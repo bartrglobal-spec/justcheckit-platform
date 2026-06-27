@@ -1,0 +1,701 @@
+/* TAILWIND */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* =========================================================
+   RESET
+========================================================= */
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  width: 100%;
+  min-height: 100%;
+  background: #04070d;
+  color: #f3f7ff;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-family:
+    Inter,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+}
+
+html {
+  overscroll-behavior-y: none;
+}
+
+/* HIDE SCROLLBAR */
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+.app-content::-webkit-scrollbar {
+  display: none;
+}
+
+html,
+body,
+.app-content {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+/* =========================================================
+   DESIGN TOKENS
+========================================================= */
+
+:root {
+  /* BACKGROUNDS */
+  --bg-primary:          #04070d;
+  --bg-secondary:        #0a101a;
+  --bg-surface:          #0f1622;
+  --bg-surface-elevated: #131c2a;
+  --bg-soft:             rgba(255, 255, 255, 0.03);
+
+  /* TEXT */
+  --text-primary:   #f5f7fb;
+  --text-secondary: rgba(245, 247, 251, 0.68);
+  --text-muted:     rgba(245, 247, 251, 0.38);
+
+  /* BORDERS */
+  --border-soft:   rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.10);
+  --border-accent: rgba(76, 141, 255, 0.24);
+
+  /* ACCENT — blue (trust, navigation, CTAs, guidance) */
+  --accent-primary: #4c8dff;
+  --accent-soft:    rgba(76, 141, 255, 0.10);
+  --accent-border:  rgba(76, 141, 255, 0.22);
+  --accent-glow:    rgba(76, 141, 255, 0.14);
+
+  /* ACCENT — gold (unlock moments, premium content, paywall only) */
+  --gold:           #c9a84c;
+  --gold-soft:      rgba(201, 168, 76, 0.10);
+  --gold-border:    rgba(201, 168, 76, 0.22);
+  --gold-glow:      rgba(201, 168, 76, 0.12);
+  --gold-text:      #e2c06a;
+
+  /* STATUS */
+  --success:        #42c97a;
+  --success-soft:   rgba(66, 201, 122, 0.10);
+  --success-border: rgba(66, 201, 122, 0.22);
+
+  --warning:        #f0b940;
+  --warning-soft:   rgba(240, 185, 64, 0.10);
+  --warning-border: rgba(240, 185, 64, 0.22);
+
+  --danger:        #ef6b6b;
+  --danger-soft:   rgba(239, 107, 107, 0.10);
+  --danger-border: rgba(239, 107, 107, 0.22);
+
+  /* SHADOWS */
+  --shadow-surface:  0 8px 24px rgba(0, 0, 0, 0.24);
+  --shadow-elevated: 0 20px 60px rgba(0, 0, 0, 0.40);
+  --shadow-card:     0 1px 0 rgba(255, 255, 255, 0.04) inset;
+
+  /* RADIUS */
+  --radius-sm:     12px;
+  --radius-card:   20px;
+  --radius-hero:   24px;
+  --radius-input:  16px;
+  --radius-button: 16px;
+  --radius-pill:   999px;
+
+  /* MOTION */
+  --ease-out:    cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --t-fast:   140ms;
+  --t-normal: 220ms;
+  --t-slow:   340ms;
+
+  /* NAV */
+  --nav-height: 80px;
+}
+
+/* =========================================================
+   APP SHELL
+========================================================= */
+
+.app-bg {
+  width: 100%;
+  min-height: 100dvh;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(76, 141, 255, 0.09) 0%, transparent 55%),
+    linear-gradient(180deg, #050811 0%, #04070d 50%, #03050a 100%);
+  color: var(--text-primary);
+}
+
+.app-frame {
+  width: 100%;
+  max-width: 430px;
+  min-height: 100dvh;
+  position: relative;
+  background: linear-gradient(180deg, rgba(13, 20, 33, 0.98) 0%, rgba(6, 9, 16, 1) 100%);
+  box-shadow:
+    0 40px 100px rgba(0, 0, 0, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.app-content {
+  width: 100%;
+  padding: 20px 16px 40px;
+  overflow-x: hidden;
+}
+
+.app-content-with-nav {
+  padding-bottom: calc(var(--nav-height) + 32px);
+}
+
+/* =========================================================
+   ONBOARDING PROGRESS BAR
+========================================================= */
+
+.onboarding-bar {
+  width: 100%;
+  padding: 16px 16px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.onboarding-steps {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+}
+
+.onboarding-step {
+  height: 3px;
+  flex: 1;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  transition: background var(--t-normal) var(--ease-out);
+}
+
+.onboarding-step-active {
+  background: var(--accent-primary);
+}
+
+.onboarding-step-done {
+  background: rgba(76, 141, 255, 0.40);
+}
+
+.onboarding-label {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-muted);
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+
+/* =========================================================
+   TYPOGRAPHY
+========================================================= */
+
+.app-eyebrow {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.20em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.app-title {
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+.section-title {
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
+  color: var(--text-primary);
+}
+
+.section-subtitle {
+  margin-top: 6px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--text-secondary);
+}
+
+.label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-transform: uppercase;
+}
+
+.body-text {
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--text-secondary);
+}
+
+/* =========================================================
+   BADGE / PILL
+========================================================= */
+
+.app-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 11px;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-soft);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  letter-spacing: 0.01em;
+}
+
+.badge-accent {
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+  color: var(--accent-primary);
+}
+
+.badge-gold {
+  background: var(--gold-soft);
+  border-color: var(--gold-border);
+  color: var(--gold-text);
+}
+
+.badge-success {
+  background: var(--success-soft);
+  border-color: var(--success-border);
+  color: var(--success);
+}
+
+.badge-warning {
+  background: var(--warning-soft);
+  border-color: var(--warning-border);
+  color: var(--warning);
+}
+
+/* =========================================================
+   CARDS
+========================================================= */
+
+.card {
+  border-radius: var(--radius-card);
+  padding: 18px;
+  background: linear-gradient(
+    160deg,
+    rgba(255, 255, 255, 0.04) 0%,
+    rgba(255, 255, 255, 0.015) 100%
+  );
+  border: 1px solid var(--border-soft);
+  box-shadow: var(--shadow-surface), var(--shadow-card);
+}
+
+.card-elevated {
+  background: linear-gradient(
+    160deg,
+    rgba(18, 26, 42, 0.97) 0%,
+    rgba(10, 15, 25, 0.99) 100%
+  );
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-elevated), var(--shadow-card);
+}
+
+.card-hero {
+  border-radius: var(--radius-hero);
+  padding: 22px 20px;
+  background: linear-gradient(
+    150deg,
+    rgba(76, 141, 255, 0.16) 0%,
+    rgba(76, 141, 255, 0.05) 100%
+  );
+  border: 1px solid var(--accent-border);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(76, 141, 255, 0.12);
+}
+
+/* Gold hero — for unlock / premium moments */
+.card-gold {
+  border-radius: var(--radius-hero);
+  padding: 22px 20px;
+  background: linear-gradient(
+    150deg,
+    rgba(201, 168, 76, 0.14) 0%,
+    rgba(201, 168, 76, 0.04) 100%
+  );
+  border: 1px solid var(--gold-border);
+  box-shadow:
+    0 20px 50px rgba(0, 0, 0, 0.32),
+    inset 0 1px 0 rgba(201, 168, 76, 0.10);
+}
+
+.card-inner {
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-soft);
+}
+
+.card-success {
+  background: var(--success-soft);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+
+.card-warning {
+  background: var(--warning-soft);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+
+.card-accent {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+
+/* =========================================================
+   INPUTS
+========================================================= */
+
+.input {
+  width: 100%;
+  padding: 15px 16px;
+  border-radius: var(--radius-input);
+  border: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+  font-size: 15px;
+  outline: none;
+  transition:
+    border-color var(--t-fast) var(--ease-out),
+    background var(--t-fast) var(--ease-out);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.input::placeholder {
+  color: var(--text-muted);
+}
+
+.input:focus {
+  border-color: var(--accent-border);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+textarea.input {
+  resize: none;
+  line-height: 1.6;
+}
+
+/* =========================================================
+   BUTTONS
+========================================================= */
+
+.btn-primary {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border: none;
+  border-radius: var(--radius-button);
+  background: linear-gradient(180deg, #5596ff 0%, #3b78e7 100%);
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow:
+    0 8px 24px rgba(59, 120, 231, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.18);
+  transition:
+    transform var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out),
+    filter var(--t-fast) var(--ease-out);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.btn-primary:active {
+  transform: scale(0.975);
+  box-shadow: 0 4px 12px rgba(59, 120, 231, 0.22);
+  filter: brightness(0.96);
+}
+
+/* Gold CTA — paywall and unlock moments only */
+.btn-gold {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 16px 20px;
+  border: none;
+  border-radius: var(--radius-button);
+  background: linear-gradient(180deg, #d4ae55 0%, #b8902e 100%);
+  color: #1a1200;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  box-shadow:
+    0 8px 24px rgba(201, 168, 76, 0.30),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+  transition:
+    transform var(--t-fast) var(--ease-out),
+    box-shadow var(--t-fast) var(--ease-out),
+    filter var(--t-fast) var(--ease-out);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.btn-gold:active {
+  transform: scale(0.975);
+  box-shadow: 0 4px 12px rgba(201, 168, 76, 0.20);
+  filter: brightness(0.96);
+}
+
+.btn-secondary {
+  width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 15px 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-button);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    transform var(--t-fast) var(--ease-out),
+    background var(--t-fast) var(--ease-out);
+  -webkit-appearance: none;
+  appearance: none;
+}
+
+.btn-secondary:active {
+  transform: scale(0.975);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--accent-primary);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity var(--t-fast) var(--ease-out);
+}
+
+.btn-ghost:active {
+  opacity: 0.6;
+}
+
+/* =========================================================
+   DIVIDER
+========================================================= */
+
+.divider {
+  width: 100%;
+  height: 1px;
+  background: var(--border-soft);
+  margin: 4px 0;
+}
+
+/* =========================================================
+   SECTION SPACING
+========================================================= */
+
+.section-gap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* =========================================================
+   NAVIGATION
+========================================================= */
+
+.app-nav {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: 0;
+  width: 100%;
+  max-width: 430px;
+  height: var(--nav-height);
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  padding: 10px 8px calc(env(safe-area-inset-bottom, 0px) + 10px);
+  border-top: 1px solid var(--border-soft);
+  background: linear-gradient(
+    180deg,
+    rgba(7, 10, 18, 0.92) 0%,
+    rgba(4, 7, 13, 0.98) 100%
+  );
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  z-index: 100;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 48px;
+  border-radius: 14px;
+  color: var(--text-muted);
+  position: relative;
+  transition:
+    color var(--t-fast) var(--ease-out),
+    background var(--t-fast) var(--ease-out);
+  cursor: pointer;
+}
+
+.nav-item:active {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.nav-active {
+  color: var(--text-primary);
+}
+
+.nav-dot {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background var(--t-fast) var(--ease-out);
+}
+
+.nav-active .nav-dot {
+  background: var(--accent-primary);
+}
+
+.nav-label {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+}
+
+/* =========================================================
+   SKELETON LOADER
+========================================================= */
+
+@keyframes shimmer {
+  0%   { background-position: -400px 0; }
+  100% { background-position:  400px 0; }
+}
+
+.skeleton {
+  border-radius: 8px;
+  background: linear-gradient(
+    90deg,
+    rgba(255, 255, 255, 0.04) 25%,
+    rgba(255, 255, 255, 0.08) 50%,
+    rgba(255, 255, 255, 0.04) 75%
+  );
+  background-size: 800px 100%;
+  animation: shimmer 1.6s infinite linear;
+}
+
+/* =========================================================
+   COPY BUTTON SUCCESS STATE
+========================================================= */
+
+.btn-copied {
+  background: linear-gradient(180deg, #42c97a, #32a862) !important;
+  box-shadow: 0 8px 24px rgba(66, 201, 122, 0.22) !important;
+}
+
+/* =========================================================
+   EMPTY STATE
+========================================================= */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 24px;
+  text-align: center;
+  gap: 12px;
+}
+
+.empty-state-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border-soft);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 22px;
+}
+
+/* =========================================================
+   UTILITY
+========================================================= */
+
+.text-accent   { color: var(--accent-primary); }
+.text-gold     { color: var(--gold-text); }
+.text-success  { color: var(--success); }
+.text-warning  { color: var(--warning); }
+.text-danger   { color: var(--danger); }
+.text-muted    { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+
+/* =========================================================
+   TAB SCROLL BAR — hide scrollbar, keep touch scroll
+========================================================= */
+
+.tab-scroll-bar::-webkit-scrollbar {
+  display: none;
+}
