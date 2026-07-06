@@ -2,6 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
+import posthog from 'posthog-js'
+// NOTE: if your PostHog client is initialised/exported differently elsewhere
+// in the app, swap this import for that — this assumes the standard
+// posthog-js client import pattern.
 
 type Property = {
   id: number
@@ -41,12 +45,20 @@ const EMPTY_ANSWERS: ProfileAnswers = {
   guarantorSupport: '',
 }
 
+// ── BETA MODE ──────────────────────────────────────────
+// Flip this to false once Payfast checkout + the beta-code system are live.
+// The matching flag lives in /unlock's page.tsx — keep both in sync.
+// While true: pricing stays visible (for real intent-signal data), but
+// nobody is actually blocked or charged.
+const BETA_FREE_ACCESS = true
+
 export default function PreviewPage() {
   const router = useRouter()
 
   const [properties, setProperties] = useState<Property[]>([])
   const [answers, setAnswers] = useState<ProfileAnswers>(EMPTY_ANSWERS)
-  const [selectedPlan, setSelectedPlan] = useState<'day' | 'week' | null>(null)
+  // Matches the unlock page's model: unlock one property, or the whole bundle.
+  const [selectedPlan, setSelectedPlan] = useState<'single' | 'bundle' | null>(null)
 
   useEffect(() => {
     const savedProperties = JSON.parse(
@@ -96,9 +108,33 @@ export default function PreviewPage() {
   }, [properties, answers])
 
   // ─── Continue handler ────────────────────────────────
-  // During beta: always free. In future, check selectedPlan here
-  // and integrate PayFast / payment before pushing to /unlock.
+  // TODO(payfast): this currently sets the unlock flag optimistically on the
+  // client, exactly like the placeholder handlers on /unlock. Once Payfast
+  // checkout + the ITN webhook + beta access codes are wired up, this should
+  // redirect to the real checkout and only set unlock state after a
+  // confirmed server-side payment (or a validated code), not immediately
+  // on click like this.
   const handleContinue = () => {
+    if (selectedPlan) {
+      posthog.capture('preview_plan_selected', { plan: selectedPlan, beta_free_access: BETA_FREE_ACCESS })
+
+      const existing = JSON.parse(localStorage.getItem('rentedge_unlock_state') || 'null')
+        || { all: false, propertyIds: [] as number[] }
+
+      const next = selectedPlan === 'bundle'
+        ? { all: true, propertyIds: existing.propertyIds }
+        : { all: existing.all, propertyIds: properties[0] ? [...existing.propertyIds, properties[0].id] : existing.propertyIds }
+
+      localStorage.setItem('rentedge_unlock_state', JSON.stringify(next))
+    }
+    router.push('/unlock')
+  }
+
+  // The always-available free path during beta. Separate from handleContinue
+  // above so we still capture which plan people *would* have picked, without
+  // forcing them to pick one just to get through right now.
+  const handleContinueFree = () => {
+    posthog.capture('preview_continued_free_beta', { plan_hovered: selectedPlan })
     router.push('/unlock')
   }
 
@@ -214,95 +250,118 @@ export default function PreviewPage() {
 
       {/* ─── PAYWALL ─────────────────────────────────────── */}
       <div className="card-gold">
-        <span className="app-badge badge-gold">Unlock full access</span>
+        <span className="app-badge badge-gold">
+          {BETA_FREE_ACCESS ? 'Free during beta' : 'Unlock full access'}
+        </span>
         <p className="section-title" style={{ marginTop: 12 }}>
           Your rental strategy is ready
         </p>
         <p className="section-subtitle">
-          RentEdge has already identified opportunities, strengths, and questions within your situation. Choose a plan to reveal everything we found.
+          {BETA_FREE_ACCESS
+            ? 'RentEdge has already identified opportunities, strengths, and questions within your situation. Here\u2019s what it\u2019ll cost after our beta — but it\u2019s free to unlock right now.'
+            : 'RentEdge has already identified opportunities, strengths, and questions within your situation. Unlock to reveal everything we found.'}
         </p>
 
-        {/* Plan selector */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 20 }}>
+        {/* Plan selector — matches the unlock page's R49 / R89 model */}
+        <div style={{ display: 'grid', gridTemplateColumns: properties.length > 1 ? '1fr 1fr' : '1fr', gap: 10, marginTop: 20 }}>
 
-          {/* Day pass */}
+          {/* Single property */}
           <button
-            onClick={() => setSelectedPlan('day')}
+            onClick={() => setSelectedPlan('single')}
             style={{
               padding: '16px 14px',
               borderRadius: 'var(--radius-card)',
-              border: `1px solid ${selectedPlan === 'day' ? 'var(--gold)' : 'var(--gold-border)'}`,
-              background: selectedPlan === 'day' ? 'rgba(201,168,76,0.18)' : 'rgba(201,168,76,0.06)',
+              border: `1px solid ${selectedPlan === 'single' ? 'var(--gold)' : 'var(--gold-border)'}`,
+              background: selectedPlan === 'single' ? 'rgba(201,168,76,0.18)' : 'rgba(201,168,76,0.06)',
               textAlign: 'left',
               cursor: 'pointer',
               transition: 'all 140ms ease',
             }}
           >
-            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Day pass</p>
-            <p style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginTop: 6 }}>R35</p>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>24 hour access</p>
+            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>This property</p>
+            <p style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginTop: 6 }}>R49</p>
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Once-off unlock</p>
           </button>
 
-          {/* Week pass */}
-          <button
-            onClick={() => setSelectedPlan('week')}
-            style={{
-              padding: '16px 14px',
-              borderRadius: 'var(--radius-card)',
-              border: `1px solid ${selectedPlan === 'week' ? 'var(--gold)' : 'var(--gold-border)'}`,
-              background: selectedPlan === 'week' ? 'rgba(201,168,76,0.18)' : 'rgba(201,168,76,0.06)',
-              textAlign: 'left',
-              cursor: 'pointer',
-              position: 'relative',
-              overflow: 'hidden',
-              transition: 'all 140ms ease',
-            }}
-          >
-            <div style={{
-              position: 'absolute', top: 8, right: -18, background: 'var(--gold)', color: '#1a1200',
-              fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', padding: '3px 24px',
-              transform: 'rotate(35deg)', textTransform: 'uppercase',
-            }}>
-              Best value
-            </div>
-            <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>Week pass</p>
-            <p style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginTop: 6 }}>R79</p>
-            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>7 day access</p>
-          </button>
+          {/* Bundle — all tracked properties */}
+          {properties.length > 1 && (
+            <button
+              onClick={() => setSelectedPlan('bundle')}
+              style={{
+                padding: '16px 14px',
+                borderRadius: 'var(--radius-card)',
+                border: `1px solid ${selectedPlan === 'bundle' ? 'var(--gold)' : 'var(--gold-border)'}`,
+                background: selectedPlan === 'bundle' ? 'rgba(201,168,76,0.18)' : 'rgba(201,168,76,0.06)',
+                textAlign: 'left',
+                cursor: 'pointer',
+                position: 'relative',
+                overflow: 'hidden',
+                transition: 'all 140ms ease',
+              }}
+            >
+              <div style={{
+                position: 'absolute', top: 8, right: -18, background: 'var(--gold)', color: '#1a1200',
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', padding: '3px 24px',
+                transform: 'rotate(35deg)', textTransform: 'uppercase',
+              }}>
+                Best value
+              </div>
+              <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>All {properties.length} properties</p>
+              <p style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginTop: 6 }}>R89</p>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Once-off unlock</p>
+            </button>
+          )}
 
         </div>
 
-        {/* Pay CTA */}
+        {/* Guarantee */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+          background: 'rgba(95,168,143,0.08)', border: '1px solid var(--success-border)',
+          marginTop: 14,
+        }}>
+          <span style={{
+            width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+            background: 'var(--success-soft)', border: '1px solid var(--success-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 12, color: 'var(--success)',
+          }}>🛡</span>
+          <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+            <strong style={{ color: 'var(--success)' }}>7-day money-back guarantee.</strong> Not useful? Get a full refund, no questions asked.
+          </p>
+        </div>
+
+        {/* Pay CTA — kept functional so plan-intent data is real, once Payfast is live this becomes the actual paid path */}
         <button
           onClick={handleContinue}
           disabled={!selectedPlan}
           className="btn-gold"
           style={{ marginTop: 16, opacity: selectedPlan ? 1 : 0.4 }}
         >
-          {selectedPlan === 'day' ? 'Unlock for R35' : selectedPlan === 'week' ? 'Unlock for R79' : 'Select a plan to continue'}
+          {selectedPlan === 'single' ? 'Unlock for R49' : selectedPlan === 'bundle' ? 'Unlock for R89' : 'Select an option to continue'}
         </button>
 
-        {/* Beta free path */}
-        <div style={{
-          marginTop: 14,
-          padding: '12px 14px',
-          borderRadius: 'var(--radius-sm)',
-          background: 'rgba(255,255,255,0.04)',
-          border: '1px solid var(--border-soft)',
-        }}>
-          <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
-            <span style={{ color: 'var(--gold-text)', fontWeight: 600 }}>Beta access: </span>
-            During beta testing, full access remains free while we refine RentEdge with renter feedback.
-          </p>
-        </div>
-
-        <button
-          onClick={handleContinue}
-          className="btn-secondary"
-          style={{ marginTop: 10, fontSize: 14 }}
-        >
-          Continue free during beta →
-        </button>
+        {BETA_FREE_ACCESS && (
+          <>
+            <div style={{
+              marginTop: 14, padding: '12px 14px', borderRadius: 'var(--radius-sm)',
+              background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-soft)',
+            }}>
+              <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                <span style={{ color: 'var(--gold-text)', fontWeight: 600 }}>Beta access: </span>
+                We're still in beta, so everything above is free right now — you will not be charged. Pricing shown is what it will cost once beta ends.
+              </p>
+            </div>
+            <button
+              onClick={handleContinueFree}
+              className="btn-secondary"
+              style={{ marginTop: 10, fontSize: 14 }}
+            >
+              Continue free during beta →
+            </button>
+          </>
+        )}
 
       </div>
 

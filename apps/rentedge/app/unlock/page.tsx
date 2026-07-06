@@ -4,6 +4,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { evaluateProperty } from '@/lib/evaluation'
 import { evaluateUnlock } from '@/lib/evaluation/unlock'
+import posthog from 'posthog-js'
+// NOTE: swap this import if your PostHog client is set up differently elsewhere.
+
+// ── BETA MODE ──────────────────────────────────────────────
+// Must match the flag in /preview's page.tsx. While true, every tab is
+// unlocked for everyone — the paywall gating below stays fully built and
+// dormant, ready to activate by flipping this to false once Payfast
+// checkout + the beta-code system are live.
+const BETA_FREE_ACCESS = true
 
 // ── Types ─────────────────────────────────────────────────
 type Property = {
@@ -135,6 +144,159 @@ function InfoCard({ label, text, colour = 'var(--text-muted)' }: { label: string
   )
 }
 
+// ── Pricing card ──────────────────────────────────────────
+function PricingCard({
+  label, price, sub, features, highlight, onSelect, ctaLabel,
+}: {
+  label: string
+  price: string
+  sub: string
+  features: string[]
+  highlight?: boolean
+  onSelect: () => void
+  ctaLabel: string
+}) {
+  return (
+    <div style={{
+      padding: '18px 18px 16px', borderRadius: 'var(--radius-card)',
+      border: `1px solid ${highlight ? 'var(--gold-border)' : 'var(--border-soft)'}`,
+      background: highlight
+        ? 'linear-gradient(150deg, rgba(201,168,76,0.14) 0%, rgba(201,168,76,0.04) 100%)'
+        : 'rgba(255,255,255,0.03)',
+      position: 'relative',
+    }}>
+      {highlight && (
+        <span style={{
+          position: 'absolute', top: -10, left: 18,
+          fontSize: 10, fontWeight: 700, padding: '3px 9px',
+          borderRadius: 'var(--radius-pill)',
+          background: 'var(--gold-text)', color: '#1a1400',
+          letterSpacing: '0.06em', textTransform: 'uppercase',
+        }}>Best value</span>
+      )}
+      <p className="label" style={{ color: highlight ? 'var(--gold-text)' : 'var(--text-muted)' }}>{label}</p>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6, marginTop: 8 }}>
+        <span style={{ fontSize: 28, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.02em' }}>{price}</span>
+        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{sub}</span>
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {features.map((f, i) => (
+          <div key={i} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+            <span style={{ fontSize: 12, color: highlight ? 'var(--gold-text)' : 'var(--success)', marginTop: 1, flexShrink: 0 }}>✓</span>
+            <span style={{ fontSize: 12.5, color: 'var(--text-secondary)', lineHeight: 1.5 }}>{f}</span>
+          </div>
+        ))}
+      </div>
+      <button
+        onClick={onSelect}
+        className={highlight ? 'btn-gold' : 'btn-primary'}
+        style={{ marginTop: 16, width: '100%' }}
+      >
+        {ctaLabel}
+      </button>
+    </div>
+  )
+}
+
+// ── Guarantee badge ───────────────────────────────────────
+function GuaranteeBadge() {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 10,
+      padding: '10px 14px', borderRadius: 'var(--radius-sm)',
+      background: 'rgba(95,168,143,0.08)', border: '1px solid var(--success-border)',
+      marginTop: 14,
+    }}>
+      <span style={{
+        width: 24, height: 24, borderRadius: '50%', flexShrink: 0,
+        background: 'var(--success-soft)', border: '1px solid var(--success-border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        fontSize: 12, color: 'var(--success)',
+      }}>🛡</span>
+      <p style={{ fontSize: 12, color: 'var(--text-secondary)', lineHeight: 1.5 }}>
+        <strong style={{ color: 'var(--success)' }}>7-day money-back guarantee.</strong> Not useful? Get a full refund, no questions asked.
+      </p>
+    </div>
+  )
+}
+
+// ── Paywall gate — shown in place of locked tab content ────
+function PaywallGate({
+  itemCount, itemNoun, teaserTitle, teaserBody, propertyCount,
+  onUnlockSingle, onUnlockBundle,
+}: {
+  itemCount: number
+  itemNoun: string
+  teaserTitle: string
+  teaserBody: string
+  propertyCount: number
+  onUnlockSingle: () => void
+  onUnlockBundle: () => void
+}) {
+  return (
+    <div className="section-gap">
+      {/* Teaser — proves the content is real and specific */}
+      <div className="card card-elevated" style={{ position: 'relative', overflow: 'hidden' }}>
+        <p className="app-eyebrow">{itemCount} {itemNoun} found for your profile</p>
+        <div style={{ marginTop: 14 }}>
+          <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>
+            {teaserTitle}
+          </p>
+          <p className="body-text" style={{ marginTop: 8 }}>{teaserBody}</p>
+        </div>
+        {/* Blurred fake lines to signal "more below" without giving anything away */}
+        <div style={{ marginTop: 16, filter: 'blur(5px)', opacity: 0.5, userSelect: 'none', pointerEvents: 'none' }}>
+          <div style={{ height: 12, borderRadius: 6, background: 'var(--text-muted)', width: '88%', marginBottom: 8 }} />
+          <div style={{ height: 12, borderRadius: 6, background: 'var(--text-muted)', width: '72%', marginBottom: 8 }} />
+          <div style={{ height: 12, borderRadius: 6, background: 'var(--text-muted)', width: '81%' }} />
+        </div>
+        <div style={{
+          position: 'absolute', left: 0, right: 0, bottom: 0, height: 90,
+          background: 'linear-gradient(to bottom, transparent, var(--surface-elevated, #14171c))',
+        }} />
+      </div>
+
+      {/* Pricing */}
+      <div className="card">
+        <p className="label" style={{ marginBottom: 4 }}>Unlock your full rental strategy</p>
+        <p className="section-subtitle" style={{ marginBottom: 16 }}>
+          Everything the free check doesn't show you — opportunities, agent questions, and a ready-to-send introduction message.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: propertyCount > 1 ? '1fr 1fr' : '1fr', gap: 12 }}>
+          <PricingCard
+            label="This property"
+            price="R49"
+            sub="once-off"
+            features={[
+              'Full opportunities, strengths & agent view',
+              'Ready-to-send introduction message',
+              'Document readiness checklist',
+            ]}
+            onSelect={onUnlockSingle}
+            ctaLabel="Unlock this property"
+          />
+          {propertyCount > 1 && (
+            <PricingCard
+              label={`All ${propertyCount} tracked properties`}
+              price="R89"
+              sub="once-off"
+              highlight
+              features={[
+                'Everything in the single unlock',
+                'Every property you\u2019re tracking, compared',
+                'Free re-run for 30 days as you add more',
+              ]}
+              onSelect={onUnlockBundle}
+              ctaLabel="Unlock all properties"
+            />
+          )}
+        </div>
+        <GuaranteeBadge />
+      </div>
+    </div>
+  )
+}
+
 // ═════════════════════════════════════════════════════════
 // MAIN PAGE
 // ═════════════════════════════════════════════════════════
@@ -147,6 +309,14 @@ export default function UnlockPage() {
   const [revealedTabs, setRevealedTabs] = useState<Set<Tab>>(new Set(['overview']))
   const [ready, setReady]               = useState(false)
 
+  // ── Unlock state ─────────────────────────────────────
+  // { all: true } once the bundle is purchased, or propertyIds contains
+  // individually-unlocked property ids. Persisted to localStorage for now —
+  // TODO(payfast): once the Payfast ITN webhook is wired up, this should be
+  // read from / written to the backend (Supabase) after a confirmed once-off
+  // payment, not just localStorage on the client.
+  const [unlockState, setUnlockState] = useState<{ all: boolean; propertyIds: number[] }>({ all: false, propertyIds: [] })
+
   useEffect(() => {
     const savedProfile    = JSON.parse(localStorage.getItem('rentedge_profile_answers') || 'null')
     const savedProperties = JSON.parse(localStorage.getItem('rentedge_properties') || '[]')
@@ -155,8 +325,26 @@ export default function UnlockPage() {
     const sel = localStorage.getItem('rentedge_selected_property_id')
     if (sel) setSelectedId(Number(sel))
     else if (savedProperties.length > 0) setSelectedId(savedProperties[0].id)
+    const savedUnlock = JSON.parse(localStorage.getItem('rentedge_unlock_state') || 'null')
+    if (savedUnlock) setUnlockState(savedUnlock)
     setReady(true)
   }, [])
+
+  const persistUnlockState = (next: { all: boolean; propertyIds: number[] }) => {
+    setUnlockState(next)
+    localStorage.setItem('rentedge_unlock_state', JSON.stringify(next))
+  }
+
+  // TODO(payfast): replace these two handlers with a redirect to the Payfast
+  // once-off checkout (R49 / R89). On successful payment, the ITN webhook
+  // should confirm server-side and this client state should be refreshed
+  // from that confirmation rather than set optimistically like this.
+  const handleUnlockSingle = (propertyId: number) => {
+    persistUnlockState({ ...unlockState, propertyIds: [...unlockState.propertyIds, propertyId] })
+  }
+  const handleUnlockBundle = () => {
+    persistUnlockState({ all: true, propertyIds: unlockState.propertyIds })
+  }
 
   const selectedProperty = useMemo(
     () => properties.find(p => p.id === selectedId) || properties[0] || null,
@@ -167,6 +355,10 @@ export default function UnlockPage() {
     setActiveTab(tab)
     setRevealedTabs(prev => new Set([...prev, tab]))
     window.scrollTo({ top: 0, behavior: 'smooth' })
+    // Tracked against the *real* unlock state, not the beta override —
+    // this is what tells us later which tabs actually drive purchase intent.
+    const wouldBeLocked = tab !== 'overview' && !(unlockState.all || (selectedProperty && unlockState.propertyIds.includes(selectedProperty.id)))
+    posthog.capture('unlock_tab_viewed', { tab, would_be_locked: wouldBeLocked, beta_free_access: BETA_FREE_ACCESS })
   }
 
   const selectProperty = (id: number) => {
@@ -296,14 +488,88 @@ export default function UnlockPage() {
 
   const contextBarProps = { income, rent, ratio, property: selectedProperty, posLabel, posColour, posBg, posBorder }
 
+  const isUnlocked = BETA_FREE_ACCESS || unlockState.all || unlockState.propertyIds.includes(selectedProperty.id)
+
   // ═══════════════════════════════════════════════════════
   return (
     <div style={{ paddingTop: 8 }}>
 
-      {/* ══ GOLD HERO ════════════════════════════════════ */}
-      <div className="card-gold" style={{ marginBottom: 20 }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-          <span className="app-badge badge-gold">Rental strategy unlocked</span>
+      {/* ══ GOLD HERO — full on Overview, compact strip elsewhere ══ */}
+      {activeTab === 'overview' ? (
+        <div className="card-gold" style={{ marginBottom: 20 }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <span className="app-badge badge-gold">Rental strategy unlocked</span>
+            <span style={{
+              fontSize: 10, fontWeight: 700, padding: '4px 10px', whiteSpace: 'nowrap',
+              borderRadius: 'var(--radius-pill)',
+              background: posBg, border: `1px solid ${posBorder}`,
+              color: posColour, letterSpacing: '0.06em', textTransform: 'uppercase',
+            }}>{posLabel}</span>
+          </div>
+
+          <h1 className="app-title" style={{ marginTop: 16, fontSize: 23 }}>
+            {evaluation.fit === 'strong'
+              ? 'Your position looks strong for this property.'
+              : evaluation.fit === 'borderline'
+              ? 'You are competitive — with a few things worth focusing on.'
+              : 'There are specific areas to address before applying.'}
+          </h1>
+
+          {/* User-specific summary — different for every user */}
+          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {[incomeContext, employmentContext, stabilityContext, readinessContext]
+              .filter(Boolean)
+              .map((sentence, i) => (
+                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+                  <span style={{
+                    fontSize: 10, marginTop: 3, flexShrink: 0,
+                    color: i === 0
+                      ? (ratio >= 3 ? 'var(--success)' : 'var(--warning)')
+                      : 'var(--text-muted)',
+                  }}>●</span>
+                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{sentence}</p>
+                </div>
+              ))}
+          </div>
+
+          {/* Selected property */}
+          <div style={{
+            marginTop: 16, padding: '12px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'rgba(0,0,0,0.25)',
+            border: '1px solid var(--gold-border)',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          }}>
+            <div style={{ minWidth: 0 }}>
+              <p className="label" style={{ color: 'var(--gold-text)' }}>Analysis for</p>
+              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4,
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {cleanTitle(selectedProperty.area || selectedProperty.title)}
+              </p>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+              <span className="app-badge">R{rent.toLocaleString()}</span>
+              <span className="app-badge">{selectedProperty.bedrooms}bd</span>
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{
+          marginBottom: 20, padding: '12px 16px',
+          borderRadius: 'var(--radius-card)',
+          background: 'linear-gradient(135deg, rgba(201,168,76,0.10) 0%, rgba(201,168,76,0.03) 100%)',
+          border: '1px solid var(--gold-border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+        }}>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {cleanTitle(selectedProperty.area || selectedProperty.title)}
+            </p>
+            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
+              R{rent.toLocaleString()}/mo · {selectedProperty.bedrooms}bd
+            </p>
+          </div>
           <span style={{
             fontSize: 10, fontWeight: 700, padding: '4px 10px', whiteSpace: 'nowrap',
             borderRadius: 'var(--radius-pill)',
@@ -311,53 +577,21 @@ export default function UnlockPage() {
             color: posColour, letterSpacing: '0.06em', textTransform: 'uppercase',
           }}>{posLabel}</span>
         </div>
+      )}
 
-        <h1 className="app-title" style={{ marginTop: 16, fontSize: 23 }}>
-          {evaluation.fit === 'strong'
-            ? 'Your position looks strong for this property.'
-            : evaluation.fit === 'borderline'
-            ? 'You are competitive — with a few things worth focusing on.'
-            : 'There are specific areas to address before applying.'}
-        </h1>
-
-        {/* User-specific summary — different for every user */}
-        <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {[incomeContext, employmentContext, stabilityContext, readinessContext]
-            .filter(Boolean)
-            .map((sentence, i) => (
-              <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                <span style={{
-                  fontSize: 10, marginTop: 3, flexShrink: 0,
-                  color: i === 0
-                    ? (ratio >= 3 ? 'var(--success)' : 'var(--warning)')
-                    : 'var(--text-muted)',
-                }}>●</span>
-                <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{sentence}</p>
-              </div>
-            ))}
-        </div>
-
-        {/* Selected property */}
+      {BETA_FREE_ACCESS && (
         <div style={{
-          marginTop: 16, padding: '12px 14px',
-          borderRadius: 'var(--radius-sm)',
-          background: 'rgba(0,0,0,0.25)',
-          border: '1px solid var(--gold-border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '9px 14px', borderRadius: 'var(--radius-pill)',
+          background: 'rgba(95,168,143,0.08)', border: '1px solid var(--success-border)',
+          marginBottom: 14,
         }}>
-          <div style={{ minWidth: 0 }}>
-            <p className="label" style={{ color: 'var(--gold-text)' }}>Analysis for</p>
-            <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {cleanTitle(selectedProperty.area || selectedProperty.title)}
-            </p>
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-            <span className="app-badge">R{rent.toLocaleString()}</span>
-            <span className="app-badge">{selectedProperty.bedrooms}bd</span>
-          </div>
+          <span style={{ fontSize: 13 }}>🎁</span>
+          <p style={{ fontSize: 12, color: 'var(--success)', fontWeight: 600 }}>
+            Everything on this page is free during our beta.
+          </p>
         </div>
-      </div>
+      )}
 
       {/* ══ TAB BAR ══════════════════════════════════════ */}
       {/* Tab bar scrolls horizontally on mobile — 6 tabs need room on small screens */}
@@ -372,6 +606,10 @@ export default function UnlockPage() {
           paddingBottom: 4,
           paddingRight: 4,
           marginBottom: 16,
+          background: 'rgba(255,255,255,0.02)',
+          borderRadius: 'var(--radius-pill)',
+          padding: 4,
+          border: '1px solid var(--border-soft)',
         }}
       >
         {TABS.map(tab => {
@@ -384,15 +622,24 @@ export default function UnlockPage() {
               style={{
                 flexShrink: 0, padding: '9px 14px',
                 borderRadius: 'var(--radius-pill)',
-                border: `1px solid ${isActive ? 'var(--gold-border)' : 'var(--border-soft)'}`,
-                background: isActive ? 'var(--gold-soft)' : 'rgba(255,255,255,0.03)',
-                color: isActive ? 'var(--gold-text)' : isRevealed ? 'var(--text-secondary)' : 'var(--text-muted)',
-                fontSize: 13, fontWeight: isActive ? 600 : 400,
-                cursor: 'pointer', transition: 'all 140ms ease', whiteSpace: 'nowrap',
+                border: `1px solid ${isActive ? 'var(--gold-border)' : 'transparent'}`,
+                background: isActive
+                  ? 'linear-gradient(135deg, rgba(201,168,76,0.22) 0%, rgba(201,168,76,0.10) 100%)'
+                  : 'transparent',
+                boxShadow: isActive ? '0 2px 8px rgba(201,168,76,0.15)' : 'none',
+                color: isActive ? 'var(--gold-text)' : isRevealed ? 'var(--text-primary)' : 'var(--text-muted)',
+                fontSize: 13, fontWeight: isActive ? 700 : 500,
+                cursor: 'pointer',
+                transition: 'all 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
+                transform: isActive ? 'scale(1.04)' : 'scale(1)',
+                whiteSpace: 'nowrap',
                 outline: 'none', WebkitTapHighlightColor: 'transparent',
               }}
             >
               {tab.label}
+              {tab.id !== 'overview' && !isUnlocked && (
+                <span style={{ marginLeft: 5, fontSize: 10, opacity: 0.6 }}>🔒</span>
+              )}
             </button>
           )
         })}
@@ -459,8 +706,20 @@ export default function UnlockPage() {
             </div>
           )}
 
+          {!isUnlocked && (
+            <div style={{
+              padding: '16px', borderRadius: 'var(--radius-card)',
+              background: 'linear-gradient(150deg, rgba(201,168,76,0.10) 0%, rgba(201,168,76,0.03) 100%)',
+              border: '1px solid var(--gold-border)', textAlign: 'center',
+            }}>
+              <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                {unlock.opportunities.length + unlock.strengths.length + unlock.agentQuestions.length} more things found — including your ready-to-send introduction message.
+              </p>
+            </div>
+          )}
+
           <button onClick={() => switchTab('opportunities')} className="btn-gold">
-            See your personalised opportunities →
+            {isUnlocked ? 'See your personalised opportunities →' : 'Unlock your full rental strategy →'}
           </button>
         </div>
       )}
@@ -479,6 +738,18 @@ export default function UnlockPage() {
               These are not generic tips. They are ranked specifically for your situation based on what is most likely to strengthen your application.
             </p>
           </div>
+
+          {!isUnlocked ? (
+            <PaywallGate
+              itemCount={unlock.opportunities.length}
+              itemNoun="opportunities"
+              teaserTitle={unlock.opportunities[0]?.title || 'Your top opportunity'}
+              teaserBody={unlock.opportunities[0]?.explanation || ''}
+              propertyCount={properties.length}
+              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
+              onUnlockBundle={handleUnlockBundle}
+            />
+          ) : (<>
 
           {/* Opportunities — full engine output, previously unused */}
           {unlock.opportunities.map((opp, i) => (
@@ -578,8 +849,10 @@ export default function UnlockPage() {
             </div>
           </div>
 
+          </>)}
+
           <button onClick={() => switchTab('strengths')} className="btn-primary">
-            See what is working in your favour →
+            {isUnlocked ? 'See what is working in your favour →' : 'See what else is behind Strengths →'}
           </button>
         </div>
       )}
@@ -598,6 +871,18 @@ export default function UnlockPage() {
               These are ranked by how much weight they carry for your specific situation — not every strength is equally valuable for every application.
             </p>
           </div>
+
+          {!isUnlocked ? (
+            <PaywallGate
+              itemCount={unlock.strengths.length}
+              itemNoun="strengths"
+              teaserTitle={unlock.strengths[0]?.title || 'Your strongest signal'}
+              teaserBody={unlock.strengths[0]?.explanation || ''}
+              propertyCount={properties.length}
+              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
+              onUnlockBundle={handleUnlockBundle}
+            />
+          ) : (<>
 
           {unlock.strengths.map((s, i) => (
             <div key={i} className="card card-elevated">
@@ -662,8 +947,10 @@ export default function UnlockPage() {
             </div>
           </div>
 
+          </>)}
+
           <button onClick={() => switchTab('agent')} className="btn-primary">
-            See the agent perspective →
+            {isUnlocked ? 'See the agent perspective →' : 'See what else is behind Agent View →'}
           </button>
         </div>
       )}
@@ -682,6 +969,18 @@ export default function UnlockPage() {
               These are not generic agent questions. They were selected based on your income structure, rental history, and readiness — the signals most likely to attract scrutiny in your specific situation.
             </p>
           </div>
+
+          {!isUnlocked ? (
+            <PaywallGate
+              itemCount={unlock.agentQuestions.length}
+              itemNoun="likely questions"
+              teaserTitle={unlock.agentQuestions[0]?.question || 'What an agent will ask first'}
+              teaserBody={unlock.agentQuestions[0]?.howYouFit || ''}
+              propertyCount={properties.length}
+              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
+              onUnlockBundle={handleUnlockBundle}
+            />
+          ) : (<>
 
           {unlock.agentQuestions.map((q, i) => (
             <div key={i} className="card">
@@ -728,8 +1027,10 @@ export default function UnlockPage() {
             </a>
           </div>
 
+          </>)}
+
           <button onClick={() => switchTab('properties')} className="btn-primary">
-            Compare your properties →
+            {isUnlocked ? 'Compare your properties →' : 'See what else is behind Properties →'}
           </button>
         </div>
       )}
@@ -803,6 +1104,18 @@ export default function UnlockPage() {
           </div>
 
           {/* Property conversation — engine output */}
+          {!isUnlocked ? (
+            <PaywallGate
+              itemCount={otherProps.length + 1}
+              itemNoun="property comparisons"
+              teaserTitle={`How ${cleanTitle(selectedProperty.area || selectedProperty.title)} compares to your other properties`}
+              teaserBody="See exactly what works in your favour here versus what might attract more scrutiny."
+              propertyCount={properties.length}
+              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
+              onUnlockBundle={handleUnlockBundle}
+            />
+          ) : (<>
+
           {unlock.propertyConversations.map((conv, i) => (
             <div key={i} className="section-gap" style={{ gap: 10 }}>
               <div className="card-success">
@@ -843,8 +1156,10 @@ export default function UnlockPage() {
             </div>
           ))}
 
+          </>)}
+
           <button onClick={() => switchTab('strategy')} className="btn-primary">
-            See your rental strategy →
+            {isUnlocked ? 'See your rental strategy →' : 'See what else is behind Strategy →'}
           </button>
         </div>
       )}
@@ -853,6 +1168,18 @@ export default function UnlockPage() {
       {activeTab === 'strategy' && (
         <div className="section-gap">
           <ContextBar {...contextBarProps} />
+
+          {!isUnlocked ? (
+            <PaywallGate
+              itemCount={unlock.focusAreas.length}
+              itemNoun="focus areas"
+              teaserTitle="Your ready-to-send introduction message is waiting here"
+              teaserBody="Built from your actual profile answers — the single most useful thing in your full report."
+              propertyCount={properties.length}
+              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
+              onUnlockBundle={handleUnlockBundle}
+            />
+          ) : (<>
 
           {/* Focus areas — engine output, now in strategy where it belongs */}
           <div className="card card-elevated">
@@ -921,7 +1248,10 @@ export default function UnlockPage() {
             <CopyBtn text={unlock.introduction.introduction} />
           </div>
 
-          {/* Final CTA */}
+          </>)}
+
+          {/* Final CTA — only shown once actually unlocked */}
+          {isUnlocked && (
           <div style={{
             padding: '28px 20px', borderRadius: 'var(--radius-hero)', textAlign: 'center',
             background: 'linear-gradient(150deg, rgba(201,168,76,0.10) 0%, rgba(76,141,255,0.08) 100%)',
@@ -944,6 +1274,7 @@ export default function UnlockPage() {
               Review from the beginning
             </button>
           </div>
+          )}
 
         </div>
       )}
