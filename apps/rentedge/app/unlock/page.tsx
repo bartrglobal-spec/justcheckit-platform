@@ -706,6 +706,19 @@ export default function UnlockPage() {
             </div>
           )}
 
+          {/* Urgency framing — in a tight vacancy market, being first with a complete
+              application often beats being the strongest applicant who's slow. */}
+          <div style={{
+            padding: '14px 16px', borderRadius: 'var(--radius-card)',
+            background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-soft)',
+            display: 'flex', gap: 10, alignItems: 'flex-start',
+          }}>
+            <span style={{ fontSize: 14, flexShrink: 0, marginTop: 1 }}>⏱</span>
+            <p className="body-text" style={{ fontSize: 13 }}>
+              <strong style={{ color: 'var(--text-primary)' }}>Speed matters as much as fit.</strong> Rental vacancy nationally sits near record lows, so agents are often choosing between several complete applications submitted within hours of a viewing. Have your documents ready before you view — the fastest complete application frequently wins over a stronger but slower one.
+            </p>
+          </div>
+
           {!isUnlocked && (
             <div style={{
               padding: '16px', borderRadius: 'var(--radius-card)',
@@ -781,13 +794,34 @@ export default function UnlockPage() {
             border: '1px solid var(--gold-border)',
           }}>
             <p className="label" style={{ color: 'var(--gold-text)', marginBottom: 10 }}>
-              Save R150–R250 before you apply
+              Know your TPN score before the agent does
             </p>
             <p className="body-text" style={{ fontSize: 13 }}>
-              Agents charge up to R250 for a credit check. Under the National Credit Act you are entitled to one free report per year from every bureau. Pull yours before any agent runs one — you see the same information and it costs nothing.
+              Almost every SA letting agent screens applicants through <strong>TPN (Tenant Profile Network)</strong> — not a generic credit bureau. TPN produces a <strong>Credex score from 0–10</strong>, colour-banded so agents can decide at a glance:
+            </p>
+            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {[
+                { band: '8 – 10', label: 'Low risk',         colour: 'var(--success)' },
+                { band: '6 – 7.9', label: 'Acceptable, some caution', colour: 'var(--warning)' },
+                { band: '4 – 5.9', label: 'Medium-high risk — guarantor likely requested', colour: 'var(--warning)' },
+                { band: '0 – 3.9', label: 'High risk — defaults or arrears usually present', colour: 'var(--danger)' },
+              ].map(row => (
+                <div key={row.band} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <span style={{
+                    fontSize: 11, fontWeight: 700, minWidth: 52, textAlign: 'center',
+                    padding: '2px 6px', borderRadius: 'var(--radius-pill)',
+                    color: row.colour, border: `1px solid ${row.colour}`,
+                  }}>{row.band}</span>
+                  <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{row.label}</span>
+                </div>
+              ))}
+            </div>
+            <p className="body-text" style={{ fontSize: 13, marginTop: 12 }}>
+              Agents charge up to R250 to run this — but under the National Credit Act you're entitled to one free report per year from every bureau feeding into it. Pull yours first. You'll see the same picture the agent will, before they do.
             </p>
             <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
+                { name: 'TPN RentCheck',    detail: 'The exact report agents pull — request as an individual', url: 'https://www.tpn.co.za/guest/faq_tenant.aspx' },
                 { name: 'ClearScore',       detail: 'Free forever via Experian',    url: 'https://www.clearscore.com/za' },
                 { name: 'TransUnion SA',    detail: 'Free once a year',             url: 'https://www.transunion.co.za/product/annual-free-credit-report' },
                 { name: 'Experian SA',      detail: 'Free once a year',             url: 'https://www.experian.co.za' },
@@ -812,6 +846,33 @@ export default function UnlockPage() {
             <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.6 }}>
               Under the Consumer Protection Act, agents may only charge for a credit check with your explicit consent. You can present your own recent report instead.
             </p>
+          </div>
+
+          {/* What to do if the report isn't clean — closes the biggest content gap.
+              Roughly a third of SA credit-active consumers have some form of impaired
+              record, so this can't be an edge case — it needs to sit right after the
+              credit-check card, not be buried or omitted. */}
+          <div className="card" style={{ borderColor: 'var(--warning-border)', background: 'var(--warning-soft)' }}>
+            <p className="label" style={{ color: 'var(--warning)' }}>If your report isn't clean</p>
+            <p className="section-title" style={{ marginTop: 8, fontSize: 15 }}>
+              An impaired record doesn't automatically end an application
+            </p>
+            <p className="body-text" style={{ marginTop: 8, fontSize: 13 }}>
+              A large share of applicants have arrears, a default, or a judgment somewhere on file — you're not unusual, and agents see this often. What changes the outcome is how you handle it:
+            </p>
+            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {[
+                'Raise it yourself, before the agent finds it. Being upfront reads as responsible; being caught out reads as hiding something.',
+                'If you\u2019re settling a default or on a payment plan, bring proof — a letter from the creditor or a payment schedule carries real weight.',
+                'A guarantor with a clean TPN and credit record can offset a weak score on its own.',
+                'If a listing is fixed on the number, it may be faster to target a property where your income and references are strong enough to carry a borderline score.',
+              ].map((tip, i) => (
+                <div key={i} style={{ display: 'flex', gap: 8 }}>
+                  <span style={{ color: 'var(--warning)', flexShrink: 0, fontSize: 14 }}>·</span>
+                  <p className="body-text" style={{ fontSize: 13 }}>{tip}</p>
+                </div>
+              ))}
+            </div>
           </div>
 
           {/* Upfront costs — specific to their property */}
@@ -945,6 +1006,14 @@ export default function UnlockPage() {
                 </div>
               ))}
             </div>
+            {profile?.referenceAvailability === 'Available' && (
+              <div className="card-inner" style={{ marginTop: 12 }}>
+                <p className="label">Make your reference count</p>
+                <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>
+                  Agents phone references directly — a reference who's unreachable or caught off guard counts against you almost as much as a bad one. Give your previous landlord a heads-up call, confirm the number on file is current, and mention you're applying so they're expecting the call.
+                </p>
+              </div>
+            )}
           </div>
 
           </>)}
