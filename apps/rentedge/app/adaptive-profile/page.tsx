@@ -47,12 +47,22 @@ export default function AdaptiveProfilePage() {
   const [answers, setAnswers] = useState<ProfileAnswers>(EMPTY_ANSWERS)
   const [editingField, setEditingField] = useState<string | null>(null)
   const [incomeBuffer, setIncomeBuffer] = useState('')
+  // Tracks whether the user has explicitly pressed "Continue" on the
+  // documentationGaps step. This must be separate from
+  // answers.documentationGaps.length, otherwise the question disappears
+  // as soon as a single checkbox is tapped, before the user can select more.
+  const [docGapsConfirmed, setDocGapsConfirmed] = useState(false)
 
   useEffect(() => {
     const savedProperties = JSON.parse(localStorage.getItem('rentedge_properties') || '[]')
     setProperties(savedProperties)
     const savedAnswers = JSON.parse(localStorage.getItem('rentedge_profile_answers') || 'null')
-    if (savedAnswers) setAnswers({ ...EMPTY_ANSWERS, ...savedAnswers })
+    if (savedAnswers) {
+      setAnswers({ ...EMPTY_ANSWERS, ...savedAnswers })
+      if (Array.isArray(savedAnswers.documentationGaps) && savedAnswers.documentationGaps.length > 0) {
+        setDocGapsConfirmed(true)
+      }
+    }
   }, [])
 
   useEffect(() => {
@@ -77,10 +87,10 @@ export default function AdaptiveProfilePage() {
   const needsReferences = answers.rentalHistory === 'Currently Renting' || answers.rentalHistory === 'Rented Before'
   const needsGuarantor  = answers.incomeSource === 'Student' || answers.rentalHistory === 'First-time renter' || signals.affordability < 60
 
-  // KEY FIX: documentationGaps is answered when length > 0
-  // 'none' sentinel = user explicitly said they have everything
-  // [] = unanswered (question must still show)
-  const docGapsAnswered = answers.documentationGaps.length > 0
+  // documentationGaps is answered only once the user explicitly presses
+  // Continue — not simply because one option has been toggled. This lets
+  // multiple documents be selected before the question advances.
+  const docGapsAnswered = docGapsConfirmed
 
   const questionQueue = [
     'incomeSource', 'incomeStructure', 'monthlyIncome', 'employmentStability', 'rentalHistory',
@@ -347,7 +357,10 @@ export default function AdaptiveProfilePage() {
               />
             </div>
             <button
-              onClick={() => updateAnswer('documentationGaps', answers.documentationGaps)}
+              onClick={() => {
+                setDocGapsConfirmed(true)
+                updateAnswer('documentationGaps', answers.documentationGaps)
+              }}
               className="btn-primary"
               style={{ marginTop: 14, opacity: answers.documentationGaps.length === 0 ? 0.4 : 1 }}
               disabled={answers.documentationGaps.length === 0}

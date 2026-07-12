@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { evaluateProperty } from '@/lib/evaluation'
+import { buildRenterProfile } from '@/lib/renterProfile'
+import { NeedleGauge } from '@/components/NeedleGauge'
 
 type Property = {
   id: number
@@ -27,8 +29,9 @@ function cleanTitle(value?: string) {
     .trim()
 }
 
-// Translate evaluation output into plain positioning language.
-// No numbers, no percentages, no grades shown to user.
+// Translate evaluation output into plain positioning language, now paired
+// with the affordability gauge rather than carrying the whole story in text
+// alone — same "About you" visual language as the Unlock page header.
 function getPositioningLanguage(evaluation: any) {
   const fit = evaluation?.fit || 'borderline'
   const financialStrength = evaluation?.financialStrength || 'stable'
@@ -92,7 +95,6 @@ export default function DashboardPage() {
     const complete = localStorage.getItem('rentedge_profile_complete') === 'true'
     setProfileComplete(complete)
 
-    // ── KEY FIX: read rentedge_profile_answers not rentedge_profile ──
     const savedProfile = JSON.parse(
       localStorage.getItem('rentedge_profile_answers') || 'null'
     )
@@ -119,24 +121,11 @@ export default function DashboardPage() {
     [properties, selectedId]
   )
 
-  // Map profile_answers → renter profile shape for evaluateProperty
+  // Shared with Unlock — previously duplicated here with a subtly different
+  // (and buggy) mapping, now guaranteed identical to what Unlock computes.
   const renterProfile = useMemo(() => {
     if (!profile) return null
-    return {
-      income: Number(profile.monthlyIncome || 0),
-      additionalIncome: 0,
-      employment: profile.incomeSource || '',
-      duration: profile.employmentStability || '',
-      occupants: profile.occupancy || '',
-      depositReady: profile.depositReadiness === 'Yes',
-      idReady: !profile.documentationGaps?.includes('ID Document'),
-      payslipReady: !profile.documentationGaps?.includes('Payslips'),
-      bankStatementsReady: !profile.documentationGaps?.includes('Bank Statements'),
-      referencesReady: profile.referenceAvailability === 'Available',
-      guarantorAvailable: profile.guarantorSupport === 'Yes',
-      evictionHistory: 'none' as string,
-      pets:            false,
-    }
+    return buildRenterProfile(profile)
   }, [profile])
 
   const evaluation = useMemo(() => {
@@ -146,6 +135,11 @@ export default function DashboardPage() {
   }, [renterProfile, selectedProperty])
 
   const positioning = evaluation ? getPositioningLanguage(evaluation) : null
+
+  const rent = Number(selectedProperty?.rent || 0)
+  const ratio = renterProfile && renterProfile.income > 0 && rent > 0
+    ? renterProfile.income / rent
+    : 0
 
   if (!ready) return null
 
@@ -248,9 +242,18 @@ export default function DashboardPage() {
             </span>
           </div>
 
-          {/* Positioning summary — qualitative only, no numbers */}
+          {/* Affordability gauge — same visual as the Unlock header, so this
+              page and Unlock read as one product instead of two. */}
+          {ratio > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'center', marginTop: 16 }}>
+              <NeedleGauge value={Math.min(ratio / 5, 1)} label={`${ratio.toFixed(1)}x`} sublabel="Affordability at this rent" size={130} />
+            </div>
+          )}
+
+          {/* Positioning summary — short label + one line, paired with the
+              gauge rather than carrying the story in text alone */}
           {positioning && (
-            <div style={{ marginTop: 18 }}>
+            <div style={{ marginTop: 12 }}>
               <div
                 style={{
                   padding: '14px 16px',
