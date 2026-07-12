@@ -5,6 +5,11 @@ import { useRouter } from 'next/navigation'
 import { evaluateProperty } from '@/lib/evaluation'
 import { evaluateUnlock } from '@/lib/evaluation/unlock'
 import posthog from 'posthog-js'
+import PdfCaptureModal from './PdfCaptureModal'
+import PropertyHeader from './PropertyHeader'
+import InsightsTab from './InsightsTab'
+import { NeedleGauge } from '@/components/NeedleGauge'
+import { buildRenterProfile } from '@/lib/renterProfile'
 // NOTE: swap this import if your PostHog client is set up differently elsewhere.
 
 // ── BETA MODE ──────────────────────────────────────────────
@@ -26,15 +31,16 @@ type Property = {
   demand?: string
 }
 
-type Tab = 'overview' | 'opportunities' | 'strengths' | 'agent' | 'properties' | 'strategy'
+// Reduced from 6 tabs to 4 — Opportunities, Strengths, and Agent View merged
+// into one Insights tab. Four fits as a fixed, non-scrolling row on mobile,
+// which removes the "hidden tabs" discovery problem entirely.
+type Tab = 'overview' | 'insights' | 'properties' | 'strategy'
 
-const TABS: { id: Tab; label: string; emoji: string }[] = [
-  { id: 'overview',      label: 'Overview',      emoji: '○' },
-  { id: 'opportunities', label: 'Opportunities',  emoji: '◎' },
-  { id: 'strengths',     label: 'Strengths',      emoji: '↑' },
-  { id: 'agent',         label: 'Agent View',     emoji: '◈' },
-  { id: 'properties',    label: 'Properties',     emoji: '⌂' },
-  { id: 'strategy',      label: 'Strategy',       emoji: '→' },
+const TABS: { id: Tab; label: string }[] = [
+  { id: 'overview',   label: 'Overview' },
+  { id: 'insights',   label: 'Insights' },
+  { id: 'properties', label: 'Properties' },
+  { id: 'strategy',   label: 'Strategy' },
 ]
 
 // ── Helpers ───────────────────────────────────────────────
@@ -48,29 +54,28 @@ function cleanTitle(value?: string) {
     .trim()
 }
 
-function buildRenterProfile(profile: any) {
-  const mapDuration = (s: string) => {
-    if (!s) return ''
-    if (s === 'More than 2 years' || s.includes('2+')) return '2+ years'
-    if (s === '1 to 2 years'      || s.includes('1-2')) return '1-2 years'
-    return s
-  }
-  const gaps: string[] = profile?.documentationGaps || []
-  return {
-    income:              Number(profile?.monthlyIncome || 0),
-    additionalIncome:    0,
-    employment:          profile?.incomeSource || '',
-    duration:            mapDuration(profile?.employmentStabilityMapped || profile?.employmentStability || ''),
-    occupants:           profile?.occupancy || '',
-    depositReady:        profile?.depositReadiness === 'Yes',
-    idReady:             !gaps.includes('ID Document'),
-    payslipReady:        !gaps.includes('Payslips'),
-    bankStatementsReady: !gaps.includes('Bank Statements'),
-    referencesReady:     profile?.referenceAvailability === 'Available',
-    guarantorAvailable:  profile?.guarantorSupport === 'Yes',
-    evictionHistory:     'none' as string,
-    pets:                false,
-  }
+// ── PDF payload helpers ─────────────────────────────────────
+// depositReadiness only ever holds these three exact strings from the
+// adaptive profile question — never a specific rand amount.
+function mapDepositStatus(value: string): 'ready' | 'partial' | 'not-ready' {
+  if (value === 'Yes') return 'ready'
+  if (value === 'Partially') return 'partial'
+  return 'not-ready'
+}
+
+// guarantorSupport and referenceAvailability are status-only fields — no
+// contact details are captured anywhere in the profile — so these produce
+// plain status sentences rather than inventing contact info that isn't there.
+function buildGuarantorText(value: string): string {
+  if (value === 'Yes') return 'A guarantor is available if required.'
+  if (value === 'Possibly') return 'Guarantor support may be available — happy to confirm if needed.'
+  return 'No guarantor currently arranged.'
+}
+
+function buildReferenceContactText(value: string): string {
+  if (value === 'Available') return 'Landlord reference available on request.'
+  if (value === 'Possibly') return 'Reference may be available — confirming details.'
+  return 'No landlord reference currently available.'
 }
 
 // ── Copy button ───────────────────────────────────────────
@@ -91,55 +96,36 @@ function CopyBtn({ text, label = 'Copy introduction message' }: { text: string; 
   )
 }
 
-// ── Context bar — shows user-specific data at top of each tab ──
-function ContextBar({
-  income, rent, ratio, property, posLabel, posColour, posBg, posBorder
-}: {
-  income: number
-  rent: number
-  ratio: number
-  property: Property
-  posLabel: string
-  posColour: string
-  posBg: string
-  posBorder: string
-}) {
+// ── Focus item — collapsible, used on the Strategy tab ─────
+function FocusItem({ index, what, why, impact }: { index: number; what: string; why: string; impact: string }) {
+  const [open, setOpen] = useState(false)
   return (
     <div style={{
-      padding: '12px 14px',
-      borderRadius: 'var(--radius-card)',
-      background: 'rgba(255,255,255,0.03)',
-      border: '1px solid var(--border-soft)',
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      gap: 12, marginBottom: 16,
+      padding: '14px 16px', borderRadius: 'var(--radius-card)',
+      background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-soft)',
     }}>
-      <div style={{ minWidth: 0 }}>
-        <p style={{ fontSize: 11, color: 'var(--text-muted)', fontWeight: 500 }}>
-          {cleanTitle(property.area || property.title)} · R{Number(rent).toLocaleString()}/mo
-        </p>
-        <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
-          Income ratio: <strong style={{ color: ratio >= 3 ? 'var(--success)' : 'var(--warning)' }}>{ratio.toFixed(1)}x</strong>
-          {' '}(need 3x)
-        </p>
+      <div onClick={() => setOpen(o => !o)} style={{ display: 'flex', gap: 12, alignItems: 'flex-start', cursor: 'pointer' }}>
+        <div style={{
+          width: 28, height: 28, borderRadius: 8, flexShrink: 0,
+          background: 'var(--accent-soft)', border: '1px solid var(--accent-border)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          fontSize: 12, fontWeight: 700, color: 'var(--accent-primary)',
+        }}>{index}</div>
+        <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', flex: 1, lineHeight: 1.4 }}>{what}</p>
+        <span style={{
+          fontSize: 11, color: 'var(--text-muted)', marginTop: 3, flexShrink: 0,
+          transform: open ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 200ms ease',
+        }}>▾</span>
       </div>
-      <span style={{
-        fontSize: 10, fontWeight: 700, padding: '4px 9px', whiteSpace: 'nowrap',
-        borderRadius: 'var(--radius-pill)',
-        background: posBg, border: `1px solid ${posBorder}`,
-        color: posColour, letterSpacing: '0.06em', textTransform: 'uppercase',
-      }}>
-        {posLabel}
-      </span>
-    </div>
-  )
-}
-
-// ── Info card ─────────────────────────────────────────────
-function InfoCard({ label, text, colour = 'var(--text-muted)' }: { label: string; text: string; colour?: string }) {
-  return (
-    <div className="card-inner">
-      <p className="label" style={{ color: colour }}>{label}</p>
-      <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>{text}</p>
+      {open && (
+        <div style={{ marginTop: 10, marginLeft: 40 }}>
+          <p className="body-text" style={{ fontSize: 13 }}>{why}</p>
+          <div className="card-accent" style={{ marginTop: 10 }}>
+            <p className="label" style={{ color: 'var(--accent-primary)' }}>Potential impact</p>
+            <p className="body-text" style={{ marginTop: 4, fontSize: 12 }}>{impact}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -308,6 +294,15 @@ export default function UnlockPage() {
   const [activeTab, setActiveTab]       = useState<Tab>('overview')
   const [revealedTabs, setRevealedTabs] = useState<Set<Tab>>(new Set(['overview']))
   const [ready, setReady]               = useState(false)
+  const [showPdfModal, setShowPdfModal] = useState(false)
+  const [pdfDownloading, setPdfDownloading] = useState(false)
+
+  // Populated later by the agent-referral capture mechanism (separate work,
+  // not part of this page) — reads a simple stored agent name if a renter
+  // arrived via an agent's referral link. Stays null for organic traffic,
+  // which is everyone right now, so this renders nothing until that
+  // capture mechanism exists.
+  const [referringAgent, setReferringAgent] = useState<string | null>(null)
 
   // ── Unlock state ─────────────────────────────────────
   // { all: true } once the bundle is purchased, or propertyIds contains
@@ -327,6 +322,12 @@ export default function UnlockPage() {
     else if (savedProperties.length > 0) setSelectedId(savedProperties[0].id)
     const savedUnlock = JSON.parse(localStorage.getItem('rentedge_unlock_state') || 'null')
     if (savedUnlock) setUnlockState(savedUnlock)
+    // TODO(agent-referral): this key doesn't get written anywhere yet — the
+    // capture mechanism (agent link → stored on entry) is separate future
+    // work. Reading it here now means the Strategy tab slot is ready to go
+    // live the moment that capture step exists, with no further page changes.
+    const savedAgent = localStorage.getItem('rentedge_referring_agent')
+    if (savedAgent) setReferringAgent(savedAgent)
     setReady(true)
   }, [])
 
@@ -392,7 +393,7 @@ export default function UnlockPage() {
   const toPropertyInput = (p: Property) => {
     const rawTitle = p.title || ''
     // Remove site names, IDs, prices, "to rent" etc from scraped titles
-    const cleanTitle = rawTitle
+    const cleanTitleValue = rawTitle
       .replace(/property24/gi, '')
       .replace(/\|.*$/, '')
       .replace(/-?\s*p\d+.*$/i, '')
@@ -407,12 +408,12 @@ export default function UnlockPage() {
     // If the cleaned title already contains the area name, don't set location
     // — prevents "I came across X in X" duplication in the intro message
     const titleContainsArea = area.length > 3 &&
-      cleanTitle.toLowerCase().includes(area.toLowerCase())
+      cleanTitleValue.toLowerCase().includes(area.toLowerCase())
 
     return {
       ...p,
-      label: cleanTitle || area || 'Property',
-      title: cleanTitle,
+      label: cleanTitleValue || area || 'Property',
+      title: cleanTitleValue,
       location: titleContainsArea ? '' : area,
       bedrooms: Number(p.bedrooms) || 0,
     }
@@ -453,28 +454,6 @@ export default function UnlockPage() {
     : evaluation.fit === 'borderline' ? 'var(--warning-border)'
     : 'var(--danger-border)'
 
-  // ── User-specific context sentences ──────────────────
-  const incomeContext = income > 0
-    ? `Your income of R${income.toLocaleString()} covers the rent at ${ratio.toFixed(1)}x. ${ratio >= 3 ? 'You meet the 3x threshold most agents require.' : 'Most agents require 3x — this is worth addressing.'}`
-    : ''
-
-  const employmentContext = profile?.incomeSource
-    ? `You earn through ${profile.incomeSource.toLowerCase()}.${isSelfEmpl ? ' As a self-employed applicant, agents will typically want 6 months of bank statements and financial records.' : ''}`
-    : ''
-
-  const readinessContext = evaluation.readinessProfile === 'fully-prepared'
-    ? 'Your documentation appears to be in good shape.'
-    : evaluation.readinessProfile === 'mostly-prepared'
-    ? 'Most documents are ready. A few gaps remain worth addressing.'
-    : 'There are documentation gaps that may slow down or complicate your application.'
-
-  const stabilityContext =
-    evaluation.stabilityConfidence === 'high'
-      ? `Your ${profile?.employmentStability || 'employment'} history adds significant confidence to your application.`
-      : evaluation.stabilityConfidence === 'moderate'
-      ? 'Your income history is developing — some agents may ask for more context.'
-      : 'Your current income situation is relatively new. Be prepared to explain your trajectory.'
-
   // ── Required docs list (user-specific) ───────────────
   const gaps: string[] = profile?.documentationGaps?.filter((g: string) => g !== 'none') || []
   const docList = [
@@ -486,7 +465,61 @@ export default function UnlockPage() {
     { doc: `Deposit ready — up to R${(rent * 2).toLocaleString()} (2x rent)`, done: profile?.depositReadiness === 'Yes' },
   ]
 
-  const contextBarProps = { income, rent, ratio, property: selectedProperty, posLabel, posColour, posBg, posBorder }
+  // Builds the real payload from the same data already driving this page,
+  // calls the PDF API, and triggers a browser download of the result.
+  const handleDownloadPdf = async (contact: { name: string; phone: string; email: string }) => {
+    setPdfDownloading(true)
+    try {
+      const payload = {
+        applicantName: contact.name,
+        phone: contact.phone,
+        email: contact.email,
+        propertyTitle: cleanTitle(selectedProperty.area || selectedProperty.title),
+        rent,
+        income,
+        ratio: Number(ratio.toFixed(1)),
+        isSelfEmployed: isSelfEmpl,
+        documents: {
+          idReady: renter.idReady,
+          bankStatementsReady: renter.bankStatementsReady,
+          payslipsReady: renter.payslipReady,
+          employmentConfirmationReady: !gaps.includes('Employment Confirmation'),
+          referenceReady: renter.referencesReady,
+          depositStatus: mapDepositStatus(profile?.depositReadiness),
+        },
+        guarantorText: buildGuarantorText(profile?.guarantorSupport),
+        referenceContactText: buildReferenceContactText(profile?.referenceAvailability),
+        introMessage: unlock.introduction.introduction,
+      }
+
+      const res = await fetch('/api/summary-pdf', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) throw new Error('PDF generation failed')
+
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'RentEdge-Summary.pdf'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error('PDF download failed:', err)
+      alert('Something went wrong generating your PDF. Please try again.')
+    } finally {
+      setPdfDownloading(false)
+    }
+  }
+
+  const docsReadyCount = docList.filter(d => d.done).length
+  const docsTotal = docList.length
+  const depositStatus = mapDepositStatus(profile?.depositReadiness)
 
   const isUnlocked = BETA_FREE_ACCESS || unlockState.all || unlockState.propertyIds.includes(selectedProperty.id)
 
@@ -494,90 +527,24 @@ export default function UnlockPage() {
   return (
     <div style={{ paddingTop: 8 }}>
 
-      {/* ══ GOLD HERO — full on Overview, compact strip elsewhere ══ */}
-      {activeTab === 'overview' ? (
-        <div className="card-gold" style={{ marginBottom: 20 }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
-            <span className="app-badge badge-gold">Rental strategy unlocked</span>
-            <span style={{
-              fontSize: 10, fontWeight: 700, padding: '4px 10px', whiteSpace: 'nowrap',
-              borderRadius: 'var(--radius-pill)',
-              background: posBg, border: `1px solid ${posBorder}`,
-              color: posColour, letterSpacing: '0.06em', textTransform: 'uppercase',
-            }}>{posLabel}</span>
-          </div>
-
-          <h1 className="app-title" style={{ marginTop: 16, fontSize: 23 }}>
-            {evaluation.fit === 'strong'
-              ? 'Your position looks strong for this property.'
-              : evaluation.fit === 'borderline'
-              ? 'You are competitive — with a few things worth focusing on.'
-              : 'There are specific areas to address before applying.'}
-          </h1>
-
-          {/* User-specific summary — different for every user */}
-          <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {[incomeContext, employmentContext, stabilityContext, readinessContext]
-              .filter(Boolean)
-              .map((sentence, i) => (
-                <div key={i} style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-                  <span style={{
-                    fontSize: 10, marginTop: 3, flexShrink: 0,
-                    color: i === 0
-                      ? (ratio >= 3 ? 'var(--success)' : 'var(--warning)')
-                      : 'var(--text-muted)',
-                  }}>●</span>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', lineHeight: 1.6 }}>{sentence}</p>
-                </div>
-              ))}
-          </div>
-
-          {/* Selected property */}
-          <div style={{
-            marginTop: 16, padding: '12px 14px',
-            borderRadius: 'var(--radius-sm)',
-            background: 'rgba(0,0,0,0.25)',
-            border: '1px solid var(--gold-border)',
-            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-          }}>
-            <div style={{ minWidth: 0 }}>
-              <p className="label" style={{ color: 'var(--gold-text)' }}>Analysis for</p>
-              <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 4,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {cleanTitle(selectedProperty.area || selectedProperty.title)}
-              </p>
-            </div>
-            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <span className="app-badge">R{rent.toLocaleString()}</span>
-              <span className="app-badge">{selectedProperty.bedrooms}bd</span>
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div style={{
-          marginBottom: 20, padding: '12px 16px',
-          borderRadius: 'var(--radius-card)',
-          background: 'linear-gradient(135deg, rgba(201,168,76,0.10) 0%, rgba(201,168,76,0.03) 100%)',
-          border: '1px solid var(--gold-border)',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12,
-        }}>
-          <div style={{ minWidth: 0 }}>
-            <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {cleanTitle(selectedProperty.area || selectedProperty.title)}
-            </p>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>
-              R{rent.toLocaleString()}/mo · {selectedProperty.bedrooms}bd
-            </p>
-          </div>
-          <span style={{
-            fontSize: 10, fontWeight: 700, padding: '4px 10px', whiteSpace: 'nowrap',
-            borderRadius: 'var(--radius-pill)',
-            background: posBg, border: `1px solid ${posBorder}`,
-            color: posColour, letterSpacing: '0.06em', textTransform: 'uppercase',
-          }}>{posLabel}</span>
-        </div>
-      )}
+      {/* ══ HEADER — About you (constant) + This property (per-property) ══ */}
+      {/* Documents and deposit come from the profile and don't change when
+          switching properties; only the affordability gauge and property
+          name/badge do. Replaces the old dual hero/context-bar pattern. */}
+      <PropertyHeader
+        properties={properties}
+        selectedId={selectedId}
+        onSelectProperty={selectProperty}
+        docsReadyCount={docsReadyCount}
+        docsTotal={docsTotal}
+        depositStatus={depositStatus}
+        selectedProperty={selectedProperty}
+        ratio={ratio}
+        posLabel={posLabel}
+        posColour={posColour}
+        posBg={posBg}
+        posBorder={posBorder}
+      />
 
       {BETA_FREE_ACCESS && (
         <div style={{
@@ -593,18 +560,10 @@ export default function UnlockPage() {
         </div>
       )}
 
-      {/* ══ TAB BAR ══════════════════════════════════════ */}
-      {/* Tab bar scrolls horizontally on mobile — 6 tabs need room on small screens */}
+      {/* ══ TAB BAR — fixed, 4 tabs, no scrolling needed ══ */}
       <div
-        className="tab-scroll-bar"
         style={{
-          display: 'flex', gap: 6,
-          overflowX: 'auto',
-          WebkitOverflowScrolling: 'touch',
-          scrollbarWidth: 'none',
-          msOverflowStyle: 'none',
-          paddingBottom: 4,
-          paddingRight: 4,
+          display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 4,
           marginBottom: 16,
           background: 'rgba(255,255,255,0.02)',
           borderRadius: 'var(--radius-pill)',
@@ -620,7 +579,7 @@ export default function UnlockPage() {
               key={tab.id}
               onClick={() => switchTab(tab.id)}
               style={{
-                flexShrink: 0, padding: '9px 14px',
+                padding: '9px 6px',
                 borderRadius: 'var(--radius-pill)',
                 border: `1px solid ${isActive ? 'var(--gold-border)' : 'transparent'}`,
                 background: isActive
@@ -631,8 +590,6 @@ export default function UnlockPage() {
                 fontSize: 13, fontWeight: isActive ? 700 : 500,
                 cursor: 'pointer',
                 transition: 'all 220ms cubic-bezier(0.34, 1.56, 0.64, 1)',
-                transform: isActive ? 'scale(1.04)' : 'scale(1)',
-                whiteSpace: 'nowrap',
                 outline: 'none', WebkitTapHighlightColor: 'transparent',
               }}
             >
@@ -648,7 +605,6 @@ export default function UnlockPage() {
       {/* ══ TAB: OVERVIEW ════════════════════════════════ */}
       {activeTab === 'overview' && (
         <div className="section-gap">
-          <ContextBar {...contextBarProps} />
 
           {/* Observations — personalised by engine */}
           <div className="card card-elevated">
@@ -731,372 +687,49 @@ export default function UnlockPage() {
             </div>
           )}
 
-          <button onClick={() => switchTab('opportunities')} className="btn-gold">
-            {isUnlocked ? 'See your personalised opportunities →' : 'Unlock your full rental strategy →'}
+          <button onClick={() => switchTab('insights')} className="btn-gold">
+            {isUnlocked ? 'See your personalised insights →' : 'Unlock your full rental strategy →'}
           </button>
         </div>
       )}
 
-      {/* ══ TAB: OPPORTUNITIES (previously unused engine) ═ */}
-      {activeTab === 'opportunities' && (
+      {/* ══ TAB: INSIGHTS (merged Opportunities + Strengths + Agent View + Resources) ══ */}
+      {activeTab === 'insights' && (
         <div className="section-gap">
-          <ContextBar {...contextBarProps} />
 
           <div className="card card-elevated">
             <p className="app-eyebrow">Personalised to your profile</p>
             <p className="section-title" style={{ marginTop: 8 }}>
-              {unlock.opportunities.length} opportunities identified
+              {unlock.opportunities.length + unlock.strengths.length + unlock.agentQuestions.length} things worth knowing
             </p>
             <p className="section-subtitle">
-              These are not generic tips. They are ranked specifically for your situation based on what is most likely to strengthen your application.
+              Opportunities, strengths, likely agent questions, and reference material. Tap any card to expand it.
             </p>
           </div>
 
           {!isUnlocked ? (
             <PaywallGate
-              itemCount={unlock.opportunities.length}
-              itemNoun="opportunities"
+              itemCount={unlock.opportunities.length + unlock.strengths.length + unlock.agentQuestions.length}
+              itemNoun="insights"
               teaserTitle={unlock.opportunities[0]?.title || 'Your top opportunity'}
               teaserBody={unlock.opportunities[0]?.explanation || ''}
               propertyCount={properties.length}
               onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
               onUnlockBundle={handleUnlockBundle}
             />
-          ) : (<>
-
-          {/* Opportunities — full engine output, previously unused */}
-          {unlock.opportunities.map((opp, i) => (
-            <div key={i} className="card card-elevated">
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 10, flexShrink: 0,
-                  background: 'var(--gold-soft)', border: '1px solid var(--gold-border)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 12, fontWeight: 700, color: 'var(--gold-text)',
-                }}>{i + 1}</div>
-                <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                  {opp.title}
-                </p>
-              </div>
-              <p className="body-text" style={{ marginTop: 12 }}>{opp.explanation}</p>
-              <InfoCard label="Why it matters" text={opp.whyItMatters} />
-              <div className="card-success" style={{ marginTop: 10 }}>
-                <p className="label" style={{ color: 'var(--success)' }}>Potential benefit</p>
-                <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>{opp.benefit}</p>
-              </div>
-            </div>
-          ))}
-
-          {/* Credit check — always here, with live deposit calc */}
-          <div style={{
-            padding: '16px', borderRadius: 'var(--radius-card)',
-            background: 'linear-gradient(135deg, rgba(201,168,76,0.12) 0%, rgba(201,168,76,0.04) 100%)',
-            border: '1px solid var(--gold-border)',
-          }}>
-            <p className="label" style={{ color: 'var(--gold-text)', marginBottom: 10 }}>
-              Know your TPN score before the agent does
-            </p>
-            <p className="body-text" style={{ fontSize: 13 }}>
-              Almost every SA letting agent screens applicants through <strong>TPN (Tenant Profile Network)</strong> — not a generic credit bureau. TPN produces a <strong>Credex score from 0–10</strong>, colour-banded so agents can decide at a glance:
-            </p>
-            <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {[
-                { band: '8 – 10', label: 'Low risk',         colour: 'var(--success)' },
-                { band: '6 – 7.9', label: 'Acceptable, some caution', colour: 'var(--warning)' },
-                { band: '4 – 5.9', label: 'Medium-high risk — guarantor likely requested', colour: 'var(--warning)' },
-                { band: '0 – 3.9', label: 'High risk — defaults or arrears usually present', colour: 'var(--danger)' },
-              ].map(row => (
-                <div key={row.band} style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-                  <span style={{
-                    fontSize: 11, fontWeight: 700, minWidth: 52, textAlign: 'center',
-                    padding: '2px 6px', borderRadius: 'var(--radius-pill)',
-                    color: row.colour, border: `1px solid ${row.colour}`,
-                  }}>{row.band}</span>
-                  <span style={{ fontSize: 12.5, color: 'var(--text-secondary)' }}>{row.label}</span>
-                </div>
-              ))}
-            </div>
-            <p className="body-text" style={{ fontSize: 13, marginTop: 12 }}>
-              Agents charge up to R250 to run this — but under the National Credit Act you're entitled to one free report per year from every bureau feeding into it. Pull yours first. You'll see the same picture the agent will, before they do.
-            </p>
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                { name: 'TPN RentCheck',    detail: 'The exact report agents pull — request as an individual', url: 'https://www.tpn.co.za/guest/faq_tenant.aspx' },
-                { name: 'ClearScore',       detail: 'Free forever via Experian',    url: 'https://www.clearscore.com/za' },
-                { name: 'TransUnion SA',    detail: 'Free once a year',             url: 'https://www.transunion.co.za/product/annual-free-credit-report' },
-                { name: 'Experian SA',      detail: 'Free once a year',             url: 'https://www.experian.co.za' },
-                { name: 'Compuscan',        detail: 'Free once a year',             url: 'https://www.compuscan.co.za' },
-              ].map(item => (
-                <a key={item.name} href={item.url} target="_blank" rel="noopener noreferrer"
-                  style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    padding: '10px 12px', borderRadius: 'var(--radius-sm)',
-                    background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-soft)',
-                    textDecoration: 'none', gap: 12,
-                  }}
-                >
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>{item.name}</p>
-                    <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>{item.detail}</p>
-                  </div>
-                  <span style={{ color: 'var(--gold-text)', fontSize: 14 }}>→</span>
-                </a>
-              ))}
-            </div>
-            <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.6 }}>
-              Under the Consumer Protection Act, agents may only charge for a credit check with your explicit consent. You can present your own recent report instead.
-            </p>
-          </div>
-
-          {/* What to do if the report isn't clean — closes the biggest content gap.
-              Roughly a third of SA credit-active consumers have some form of impaired
-              record, so this can't be an edge case — it needs to sit right after the
-              credit-check card, not be buried or omitted. */}
-          <div className="card" style={{ borderColor: 'var(--warning-border)', background: 'var(--warning-soft)' }}>
-            <p className="label" style={{ color: 'var(--warning)' }}>If your report isn't clean</p>
-            <p className="section-title" style={{ marginTop: 8, fontSize: 15 }}>
-              An impaired record doesn't automatically end an application
-            </p>
-            <p className="body-text" style={{ marginTop: 8, fontSize: 13 }}>
-              A large share of applicants have arrears, a default, or a judgment somewhere on file — you're not unusual, and agents see this often. What changes the outcome is how you handle it:
-            </p>
-            <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {[
-                'Raise it yourself, before the agent finds it. Being upfront reads as responsible; being caught out reads as hiding something.',
-                'If you\u2019re settling a default or on a payment plan, bring proof — a letter from the creditor or a payment schedule carries real weight.',
-                'A guarantor with a clean TPN and credit record can offset a weak score on its own.',
-                'If a listing is fixed on the number, it may be faster to target a property where your income and references are strong enough to carry a borderline score.',
-              ].map((tip, i) => (
-                <div key={i} style={{ display: 'flex', gap: 8 }}>
-                  <span style={{ color: 'var(--warning)', flexShrink: 0, fontSize: 14 }}>·</span>
-                  <p className="body-text" style={{ fontSize: 13 }}>{tip}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Upfront costs — specific to their property */}
-          <div className="card card-elevated">
-            <p className="app-eyebrow">Upfront cost reality check</p>
-            <p className="section-title" style={{ marginTop: 8, fontSize: 15 }}>
-              What you need ready for {cleanTitle(selectedProperty.area || selectedProperty.title)}
-            </p>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 14 }}>
-              {[
-                { label: 'Deposit (1.5–2x)',  value: `R${(rent * 1.5).toLocaleString()} – R${(rent * 2).toLocaleString()}` },
-                { label: 'First month rent',  value: `R${rent.toLocaleString()}` },
-                { label: 'Admin fee (est)',   value: 'R800 – R1,200' },
-                { label: 'Total to have ready', value: `R${(rent * 2.5 + 1000).toLocaleString()}+` },
-              ].map(item => (
-                <div key={item.label} className="card-inner">
-                  <p className="label">{item.label}</p>
-                  <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)', marginTop: 6 }}>{item.value}</p>
-                </div>
-              ))}
-            </div>
-            <div style={{
-              marginTop: 12, padding: '12px 14px', borderRadius: 'var(--radius-sm)',
-              background: renter.depositReady ? 'var(--success-soft)' : 'var(--warning-soft)',
-              border: `1px solid ${renter.depositReady ? 'var(--success-border)' : 'var(--warning-border)'}`,
-            }}>
-              <p style={{ fontSize: 13, color: renter.depositReady ? 'var(--success)' : 'var(--warning)', fontWeight: 600 }}>
-                {renter.depositReady ? 'You indicated deposit is ready ✓' : 'You indicated deposit is not fully ready'}
-              </p>
-              <p className="body-text" style={{ marginTop: 4, fontSize: 12 }}>
-                {renter.depositReady
-                  ? 'Keep these funds accessible. Properties can move quickly.'
-                  : 'This is worth resolving before applying. Agents often ask for proof of deposit availability upfront.'}
-              </p>
-            </div>
-          </div>
-
-          </>)}
-
-          <button onClick={() => switchTab('strengths')} className="btn-primary">
-            {isUnlocked ? 'See what is working in your favour →' : 'See what else is behind Strengths →'}
-          </button>
-        </div>
-      )}
-
-      {/* ══ TAB: STRENGTHS ═══════════════════════════════ */}
-      {activeTab === 'strengths' && (
-        <div className="section-gap">
-          <ContextBar {...contextBarProps} />
-
-          <div className="card">
-            <p className="app-eyebrow">Engine-scored for your profile</p>
-            <p className="section-title" style={{ marginTop: 8 }}>
-              {unlock.strengths.length} things already working in your favour
-            </p>
-            <p className="section-subtitle">
-              These are ranked by how much weight they carry for your specific situation — not every strength is equally valuable for every application.
-            </p>
-          </div>
-
-          {!isUnlocked ? (
-            <PaywallGate
-              itemCount={unlock.strengths.length}
-              itemNoun="strengths"
-              teaserTitle={unlock.strengths[0]?.title || 'Your strongest signal'}
-              teaserBody={unlock.strengths[0]?.explanation || ''}
-              propertyCount={properties.length}
-              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
-              onUnlockBundle={handleUnlockBundle}
+          ) : (
+            <InsightsTab
+              opportunities={unlock.opportunities}
+              strengths={unlock.strengths}
+              agentQuestions={unlock.agentQuestions}
+              rent={rent}
+              selectedPropertyLabel={cleanTitle(selectedProperty.area || selectedProperty.title)}
+              depositReady={renter.depositReady}
+              docList={docList}
+              isSelfEmpl={isSelfEmpl}
+              referenceAvailable={profile?.referenceAvailability === 'Available'}
             />
-          ) : (<>
-
-          {unlock.strengths.map((s, i) => (
-            <div key={i} className="card card-elevated">
-              <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                <div style={{
-                  width: 32, height: 32, borderRadius: 10, flexShrink: 0,
-                  background: 'var(--success-soft)', border: '1px solid var(--success-border)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  fontSize: 13, color: 'var(--success)', fontWeight: 700,
-                }}>✓</div>
-                <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                  {s.title}
-                </p>
-              </div>
-              <p className="body-text" style={{ marginTop: 12 }}>{s.explanation}</p>
-              <InfoCard label="Why this matters for your application" text={s.whyItMatters} />
-              <div className="card-accent" style={{ marginTop: 10 }}>
-                <p className="label" style={{ color: 'var(--accent-primary)' }}>Keep doing this</p>
-                <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>{s.keepDoing}</p>
-              </div>
-            </div>
-          ))}
-
-          {/* Document readiness — user-specific checklist */}
-          <div className="card card-elevated">
-            <p className="app-eyebrow">Application readiness</p>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-              <p className="section-title" style={{ fontSize: 15 }}>
-                {isSelfEmpl ? 'Self-employed document checklist' : 'Standard document checklist'}
-              </p>
-              <span style={{
-                fontSize: 11, fontWeight: 700,
-                padding: '3px 10px', borderRadius: 'var(--radius-pill)',
-                background: docList.every(d => d.done) ? 'var(--success-soft)' : 'var(--warning-soft)',
-                border: `1px solid ${docList.every(d => d.done) ? 'var(--success-border)' : 'var(--warning-border)'}`,
-                color: docList.every(d => d.done) ? 'var(--success)' : 'var(--warning)',
-              }}>
-                {docList.filter(d => d.done).length}/{docList.length}
-              </span>
-            </div>
-            {isSelfEmpl && (
-              <p className="section-subtitle" style={{ marginTop: 4 }}>
-                As a self-employed applicant, agents require more documentation than salaried employees.
-              </p>
-            )}
-            <div style={{ marginTop: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {docList.map((item, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'flex-start', gap: 10,
-                  padding: '10px 12px', borderRadius: 'var(--radius-sm)',
-                  background: item.done ? 'var(--success-soft)' : 'rgba(255,255,255,0.02)',
-                  border: `1px solid ${item.done ? 'var(--success-border)' : 'var(--border-soft)'}`,
-                }}>
-                  <span style={{ fontSize: 13, color: item.done ? 'var(--success)' : 'var(--text-muted)', flexShrink: 0, marginTop: 1 }}>
-                    {item.done ? '✓' : '○'}
-                  </span>
-                  <p style={{ fontSize: 13, color: item.done ? 'var(--text-primary)' : 'var(--text-secondary)', lineHeight: 1.5 }}>
-                    {item.doc}
-                  </p>
-                </div>
-              ))}
-            </div>
-            {profile?.referenceAvailability === 'Available' && (
-              <div className="card-inner" style={{ marginTop: 12 }}>
-                <p className="label">Make your reference count</p>
-                <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>
-                  Agents phone references directly — a reference who's unreachable or caught off guard counts against you almost as much as a bad one. Give your previous landlord a heads-up call, confirm the number on file is current, and mention you're applying so they're expecting the call.
-                </p>
-              </div>
-            )}
-          </div>
-
-          </>)}
-
-          <button onClick={() => switchTab('agent')} className="btn-primary">
-            {isUnlocked ? 'See the agent perspective →' : 'See what else is behind Agent View →'}
-          </button>
-        </div>
-      )}
-
-      {/* ══ TAB: AGENT VIEW ══════════════════════════════ */}
-      {activeTab === 'agent' && (
-        <div className="section-gap">
-          <ContextBar {...contextBarProps} />
-
-          <div className="card card-elevated">
-            <p className="app-eyebrow">Scored for your specific profile</p>
-            <p className="section-title" style={{ marginTop: 8 }}>
-              {unlock.agentQuestions.length} questions likely to come up
-            </p>
-            <p className="section-subtitle">
-              These are not generic agent questions. They were selected based on your income structure, rental history, and readiness — the signals most likely to attract scrutiny in your specific situation.
-            </p>
-          </div>
-
-          {!isUnlocked ? (
-            <PaywallGate
-              itemCount={unlock.agentQuestions.length}
-              itemNoun="likely questions"
-              teaserTitle={unlock.agentQuestions[0]?.question || 'What an agent will ask first'}
-              teaserBody={unlock.agentQuestions[0]?.howYouFit || ''}
-              propertyCount={properties.length}
-              onUnlockSingle={() => handleUnlockSingle(selectedProperty.id)}
-              onUnlockBundle={handleUnlockBundle}
-            />
-          ) : (<>
-
-          {unlock.agentQuestions.map((q, i) => (
-            <div key={i} className="card">
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14 }}>
-                <span style={{
-                  fontSize: 10, fontWeight: 700, padding: '3px 9px',
-                  borderRadius: 'var(--radius-pill)',
-                  background: 'var(--accent-soft)', border: '1px solid var(--accent-border)',
-                  color: 'var(--accent-primary)', letterSpacing: '0.08em', textTransform: 'uppercase',
-                }}>Question {i + 1} of {unlock.agentQuestions.length}</span>
-              </div>
-              <p style={{ fontSize: 16, fontWeight: 650, color: 'var(--text-primary)', lineHeight: 1.4 }}>
-                {q.question}
-              </p>
-              <div className="section-gap" style={{ marginTop: 14, gap: 8 }}>
-                <InfoCard label="How agents often think about this" text={q.howAgentsThink} />
-                <InfoCard label="In your specific situation" text={q.howYouFit} colour="var(--text-secondary)" />
-                <InfoCard label="Why we flagged this for you" text={q.whyWeSayThat} />
-                <div className="card-accent">
-                  <p className="label" style={{ color: 'var(--accent-primary)' }}>What we would do next</p>
-                  <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>{q.nextMove}</p>
-                </div>
-              </div>
-            </div>
-          ))}
-
-          {/* PPRA verification */}
-          <div className="card" style={{ borderColor: 'var(--warning-border)', background: 'var(--warning-soft)' }}>
-            <p className="label" style={{ color: 'var(--warning)' }}>Know your rights</p>
-            <p className="section-title" style={{ marginTop: 8, fontSize: 15 }}>Application fees are not permitted</p>
-            <p className="body-text" style={{ marginTop: 8 }}>
-              Under the Consumer Protection Act, agents cannot charge an application fee. They may only charge for services rendered — like credit checks — with your explicit consent.
-            </p>
-            <a href="https://www.theppra.org.za" target="_blank" rel="noopener noreferrer"
-              style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                marginTop: 12, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
-                background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-soft)',
-                textDecoration: 'none',
-              }}
-            >
-              <p style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Verify your agent on PPRA</p>
-              <span style={{ color: 'var(--accent-primary)', fontSize: 14 }}>→</span>
-            </a>
-          </div>
-
-          </>)}
+          )}
 
           <button onClick={() => switchTab('properties')} className="btn-primary">
             {isUnlocked ? 'Compare your properties →' : 'See what else is behind Properties →'}
@@ -1107,70 +740,58 @@ export default function UnlockPage() {
       {/* ══ TAB: PROPERTIES ══════════════════════════════ */}
       {activeTab === 'properties' && (
         <div className="section-gap">
-          <ContextBar {...contextBarProps} />
 
           <div className="card card-elevated">
             <p className="app-eyebrow">Property-specific analysis</p>
             <p className="section-title" style={{ marginTop: 8 }}>Same renter. Different property. Different picture.</p>
             <p className="section-subtitle">
-              Switching the property below re-runs the analysis against your profile. Your strengths stay the same — what changes is how they are weighted against each property's requirements.
+              Switching the property in the header above re-runs the analysis against your profile. Your strengths stay the same — what changes is how they are weighted against each property's requirements.
             </p>
           </div>
 
-          {/* Property switcher */}
-          <div className="section-gap" style={{ gap: 8 }}>
-            <div style={{
-              padding: '14px 16px', borderRadius: 'var(--radius-card)',
-              border: '1px solid var(--gold-border)', background: 'var(--gold-soft)',
-            }}>
-              <p style={{ fontSize: 10, fontWeight: 700, color: 'var(--gold-text)', letterSpacing: '0.16em', textTransform: 'uppercase' }}>
-                Currently viewing
+          {/* Quick affordability comparison across every tracked property —
+              documents and deposit don't vary per property (see header), so
+              only affordability needs repeating here. */}
+          {properties.length > 1 && (
+            <div className="card card-elevated">
+              <p className="app-eyebrow">Compare at a glance</p>
+              <p className="section-subtitle" style={{ marginTop: 4, marginBottom: 4 }}>
+                Affordability for each property you're tracking, based on your income.
               </p>
-              <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)', marginTop: 6 }}>
-                {cleanTitle(selectedProperty.area || selectedProperty.title)}
-              </p>
-              <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
-                <span className="app-badge">R{rent.toLocaleString()}/mo</span>
-                <span className="app-badge">{selectedProperty.bedrooms} beds</span>
-                <span style={{
-                  fontSize: 11, fontWeight: 600, padding: '3px 8px',
-                  borderRadius: 'var(--radius-pill)',
-                  background: posBg, border: `1px solid ${posBorder}`,
-                  color: posColour,
-                }}>{posLabel}</span>
+              <div style={{
+                display: 'flex', gap: 12, overflowX: 'auto', paddingTop: 8, paddingBottom: 2,
+                WebkitOverflowScrolling: 'touch', scrollbarWidth: 'none', msOverflowStyle: 'none',
+              }}>
+                {properties.map(p => {
+                  const pRatio = income > 0 && Number(p.rent) > 0 ? income / Number(p.rent) : 0
+                  return (
+                    <div key={p.id} style={{ flexShrink: 0, width: 92, textAlign: 'center' }}>
+                      <NeedleGauge value={Math.min(pRatio / 5, 1)} label={`${pRatio.toFixed(1)}x`} sublabel="Affordability" size={80} />
+                      <p style={{
+                        fontSize: 11, color: 'var(--text-muted)', margin: '2px 0 0',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {cleanTitle(p.area || p.title)}
+                      </p>
+                    </div>
+                  )
+                })}
               </div>
             </div>
+          )}
 
-            {otherProps.length > 0 ? otherProps.map(p => (
-              <button key={p.id} onClick={() => selectProperty(p.id)} style={{
-                width: '100%', textAlign: 'left', padding: '14px 16px',
-                borderRadius: 'var(--radius-card)',
-                border: '1px solid var(--border-soft)',
-                background: 'rgba(255,255,255,0.02)',
-                cursor: 'pointer', transition: 'all 140ms ease', outline: 'none',
-              }}>
-                <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-primary)' }}>
-                  {cleanTitle(p.area || p.title)}
-                </p>
-                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
-                  <span className="app-badge">R{Number(p.rent||0).toLocaleString()}/mo</span>
-                  <span className="app-badge">{p.bedrooms} beds</span>
-                </div>
-                <p style={{ fontSize: 12, color: 'var(--accent-primary)', marginTop: 8 }}>
-                  Tap to switch analysis to this property →
-                </p>
+          {/* Switching properties happens in the header above — this tab
+              only needs a nudge for people tracking just one property. */}
+          {otherProps.length === 0 && (
+            <div className="card-inner" style={{ textAlign: 'center' }}>
+              <p className="body-text" style={{ fontSize: 13 }}>
+                You have one property tracked. Add more in Check to compare how your profile performs against different rentals.
+              </p>
+              <button onClick={() => router.push('/check')} className="btn-ghost" style={{ marginTop: 8 }}>
+                Add another property
               </button>
-            )) : (
-              <div className="card-inner" style={{ textAlign: 'center' }}>
-                <p className="body-text" style={{ fontSize: 13 }}>
-                  You have one property tracked. Add more in Check to compare how your profile performs against different rentals.
-                </p>
-                <button onClick={() => router.push('/check')} className="btn-ghost" style={{ marginTop: 8 }}>
-                  Add another property
-                </button>
-              </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* Property conversation — engine output */}
           {!isUnlocked ? (
@@ -1236,7 +857,6 @@ export default function UnlockPage() {
       {/* ══ TAB: STRATEGY ════════════════════════════════ */}
       {activeTab === 'strategy' && (
         <div className="section-gap">
-          <ContextBar {...contextBarProps} />
 
           {!isUnlocked ? (
             <PaywallGate
@@ -1250,7 +870,7 @@ export default function UnlockPage() {
             />
           ) : (<>
 
-          {/* Focus areas — engine output, now in strategy where it belongs */}
+          {/* Focus areas — engine output, collapsible so the list scans fast */}
           <div className="card card-elevated">
             <p className="app-eyebrow">Ranked by impact for your situation</p>
             <p className="section-title" style={{ marginTop: 8 }}>
@@ -1261,26 +881,7 @@ export default function UnlockPage() {
             </p>
             <div className="section-gap" style={{ marginTop: 16, gap: 10 }}>
               {unlock.focusAreas.map((focus, i) => (
-                <div key={i} style={{
-                  padding: '14px 16px', borderRadius: 'var(--radius-card)',
-                  background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border-soft)',
-                  display: 'flex', gap: 12, alignItems: 'flex-start',
-                }}>
-                  <div style={{
-                    width: 28, height: 28, borderRadius: 8, flexShrink: 0,
-                    background: 'var(--accent-soft)', border: '1px solid var(--accent-border)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    fontSize: 12, fontWeight: 700, color: 'var(--accent-primary)',
-                  }}>{i + 1}</div>
-                  <div>
-                    <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-primary)' }}>{focus.what}</p>
-                    <p className="body-text" style={{ marginTop: 4, fontSize: 13 }}>{focus.why}</p>
-                    <div className="card-accent" style={{ marginTop: 10 }}>
-                      <p className="label" style={{ color: 'var(--accent-primary)' }}>Potential impact</p>
-                      <p className="body-text" style={{ marginTop: 4, fontSize: 12 }}>{focus.impact}</p>
-                    </div>
-                  </div>
-                </div>
+                <FocusItem key={i} index={i + 1} what={focus.what} why={focus.why} impact={focus.impact} />
               ))}
             </div>
           </div>
@@ -1298,6 +899,18 @@ export default function UnlockPage() {
 
           {/* Introduction message — the payoff moment */}
           <div className="card-gold" style={{ padding: '22px 20px' }}>
+            {referringAgent && (
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+                borderRadius: 'var(--radius-pill)', background: 'var(--accent-soft)',
+                border: '1px solid var(--accent-border)', marginBottom: 14, width: 'fit-content',
+              }}>
+                <span style={{ fontSize: 12 }}>→</span>
+                <p style={{ fontSize: 12, color: 'var(--accent-primary)', fontWeight: 600 }}>
+                  Sending to: {referringAgent}
+                </p>
+              </div>
+            )}
             <span className="app-badge badge-gold">Ready to send</span>
             <p className="section-title" style={{ marginTop: 12 }}>Your introduction message</p>
             <p className="section-subtitle">
@@ -1315,6 +928,29 @@ export default function UnlockPage() {
               </p>
             </div>
             <CopyBtn text={unlock.introduction.introduction} />
+
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
+              Includes your income ratio, document checklist, and this introduction message — one page, ready to send to an agent.
+            </p>
+
+            <button
+              onClick={() => setShowPdfModal(true)}
+              className="btn-primary"
+              style={{ marginTop: 6, opacity: pdfDownloading ? 0.6 : 1 }}
+              disabled={pdfDownloading}
+            >
+              {pdfDownloading ? 'Preparing your PDF…' : 'Download PDF'}
+            </button>
+
+            {showPdfModal && (
+              <PdfCaptureModal
+                onClose={() => setShowPdfModal(false)}
+                onSubmit={async (contact) => {
+                  setShowPdfModal(false)
+                  await handleDownloadPdf(contact)
+                }}
+              />
+            )}
           </div>
 
           </>)}
