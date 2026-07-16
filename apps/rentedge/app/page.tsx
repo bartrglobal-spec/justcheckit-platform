@@ -157,14 +157,26 @@ export default function LandingPage() {
     { step: '04', label: 'Know what agents check first', sub: 'See exactly what stands out before you apply', accent: true },
   ]
 
+  // App-shell layout: the outer div is pinned to the full viewport with
+  // `position: fixed; inset: 0`, and ONLY the inner content div scrolls.
+  // The CTA bar below is a normal flex child, not independently
+  // `position: fixed` — so there's no separate page-level scroll for a
+  // mobile browser's collapsing address bar / in-app-browser chrome to
+  // desync from. Previously the CTA was `position: fixed; bottom: 0`
+  // against the page's own scroll, which is exactly the setup that causes
+  // the bar to render below the visible viewport on Facebook's in-app
+  // browser and some mobile Safari cases — it "existed" but wasn't
+  // reachable without an extra scroll.
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: '100dvh', padding: '0 16px' }}>
+    <div style={{ position: 'fixed', inset: 0, display: 'flex', flexDirection: 'column', background: 'var(--surface-elevated, #14171c)' }}>
+
+      <div style={{ flex: 1, overflowY: 'auto', WebkitOverflowScrolling: 'touch', padding: '0 16px' }}>
 
       <div style={{ paddingTop: 32, paddingBottom: 8 }}>
         <span className="app-eyebrow" style={{ letterSpacing: '0.28em' }}>RENTEDGE</span>
       </div>
 
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16, paddingTop: 24, paddingBottom: 24 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 16, paddingTop: 24, paddingBottom: 24 }}>
 
         {/* ── Hero ── */}
         <div className="card-hero">
@@ -225,12 +237,18 @@ export default function LandingPage() {
 
       </div>
 
-      {/* Trailing spacer so the last card isn't hidden behind the sticky CTA */}
-      <div style={{ height: 92 }} />
+      </div>
+      {/* ↑ closes the scrollable content div. Everything below is OUTSIDE
+          the scroll area — a normal flex child pinned to the bottom of the
+          fixed-size app shell, not independently viewport-fixed. This is
+          what actually keeps it reachable across mobile browsers. */}
 
-      {/* Sticky CTA */}
+      {/* CTA bar — no longer position:fixed. It's guaranteed visible
+          because it's the last child of a fixed, full-viewport flex
+          column; there's no separate scrolling context for it to fall
+          outside of. */}
       <div style={{
-        position: 'fixed', left: 0, right: 0, bottom: 0, zIndex: 100,
+        flexShrink: 0,
         padding: '14px 16px calc(14px + env(safe-area-inset-bottom, 0px))',
         background: 'var(--surface-elevated, #14171c)',
         borderTop: '1px solid var(--border-soft)',
