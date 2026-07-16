@@ -46,10 +46,19 @@ const styles = StyleSheet.create({
   headerRight: { alignItems: "flex-end" },
   headerRightText: { color: "#B8BCC4", fontSize: 8, marginBottom: 4 },
   body: { paddingHorizontal: 40, paddingTop: 24, paddingBottom: 30 },
-  snapshotRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 12 },
-  snapshotCol: { flexDirection: "column" },
+  // Fixed widths + right padding so a long applicant name or property title
+  // wraps inside its own column instead of overlapping the next one — the
+  // old version had no width constraint at all on snapshotCol, so
+  // "space-between" only spaced the columns apart without ever capping how
+  // wide a single long value was allowed to grow.
+  snapshotRow: { flexDirection: "row", marginBottom: 12 },
+  snapshotCol: { flexDirection: "column", paddingRight: 8 },
+  snapshotColApplicant: { width: "26%" },
+  snapshotColProperty: { width: "34%" },
+  snapshotColRent: { width: "20%" },
+  snapshotColGenerated: { width: "20%", paddingRight: 0 },
   label: { fontSize: 8, fontFamily: "Helvetica-Bold", color: "#6B7280", marginBottom: 4, letterSpacing: 0.5 },
-  value: { fontSize: 12, fontFamily: "Helvetica-Bold", color: "#1A1D23" },
+  value: { fontSize: 11, fontFamily: "Helvetica-Bold", color: "#1A1D23", lineHeight: 1.3 },
   contactRow: { flexDirection: "row", justifyContent: "space-between", marginBottom: 14 },
   contactText: { fontSize: 8.5, color: "#6B7280" },
   divider: { borderBottomWidth: 0.75, borderBottomColor: "#E5E7EB", marginBottom: 14 },
@@ -170,22 +179,22 @@ function buildDocument(data: any) {
           View,
           { style: styles.snapshotRow },
           React.createElement(
-            View, { style: styles.snapshotCol },
+            View, { style: [styles.snapshotCol, styles.snapshotColApplicant] },
             React.createElement(Text, { style: styles.label }, "APPLICANT"),
             React.createElement(Text, { style: styles.value }, applicantName)
           ),
           React.createElement(
-            View, { style: styles.snapshotCol },
+            View, { style: [styles.snapshotCol, styles.snapshotColProperty] },
             React.createElement(Text, { style: styles.label }, "PROPERTY"),
             React.createElement(Text, { style: styles.value }, propertyTitle)
           ),
           React.createElement(
-            View, { style: styles.snapshotCol },
+            View, { style: [styles.snapshotCol, styles.snapshotColRent] },
             React.createElement(Text, { style: styles.label }, "MONTHLY RENT"),
             React.createElement(Text, { style: styles.value }, `R${Number(rent).toLocaleString()}`)
           ),
           React.createElement(
-            View, { style: styles.snapshotCol },
+            View, { style: [styles.snapshotCol, styles.snapshotColGenerated] },
             React.createElement(Text, { style: styles.label }, "GENERATED"),
             React.createElement(Text, { style: styles.value }, generatedDate)
           )

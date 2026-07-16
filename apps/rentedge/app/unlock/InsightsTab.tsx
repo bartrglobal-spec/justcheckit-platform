@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import InsightCard from './InsightCard'
 
-type Filter = 'all' | 'opportunity' | 'strength' | 'agent' | 'resource'
+type Filter = 'all' | 'opportunity' | 'strength' | 'agent' | 'resource' | 'faq'
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'all',         label: 'All' },
@@ -11,6 +11,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: 'strength',    label: 'Strengths' },
   { id: 'agent',       label: 'For agents' },
   { id: 'resource',    label: 'Resources' },
+  { id: 'faq',         label: 'FAQ' },
 ]
 
 function InfoCard({ label, text, colour = 'var(--text-muted)' }: { label: string; text: string; colour?: string }) {
@@ -285,6 +286,45 @@ export default function InsightsTab({
           </InsightCard>
         </div>
       )}
+
+      {/* ── FAQ — common questions, same for everyone ─── */}
+      {(showAll || filter === 'faq') && (
+        <div className="section-gap" style={{ gap: 8 }}>
+          {showAll && <SectionLabel text="FAQ" />}
+
+          <InsightCard category="faq" title="Is RentEdge free?">
+            <p className="body-text">
+              Everything is free during our beta. If that changes, any paid unlock comes with a 7-day money-back guarantee — not useful, get a full refund, no questions asked.
+            </p>
+          </InsightCard>
+
+          <InsightCard category="faq" title="Does this replace the agent's own checks?">
+            <p className="body-text">
+              No. RentEdge is prepared by you, based on information you provide, to speed up your application. It is not a substitute for the letting agent's own credit, reference, and affordability checks — they'll still run their own process.
+            </p>
+          </InsightCard>
+
+          <InsightCard category="faq" title="Is my information safe?">
+            <p className="body-text">
+              Your profile answers and tracked properties are stored only in your own browser — nothing is sent to or stored on our servers. The one exception is generating your PDF summary: that information is used to build the document and returned straight to you, not saved anywhere.
+            </p>
+          </InsightCard>
+
+          <InsightCard category="faq" title="How many properties can I track?">
+            <p className="body-text">
+              Up to 5 at a time. Switch between them from the property strip at the top of this page — your profile stays the same, only the affordability picture changes per property.
+            </p>
+          </InsightCard>
+
+          <InsightCard category="faq" title="What if some of my documents aren't ready yet?">
+            <p className="body-text">
+              That's normal — RentEdge shows you exactly what's ready, partially ready, or missing, so you know what to prepare before applying. It won't stop you from using the tool in the meantime.
+            </p>
+          </InsightCard>
+        </div>
+      )}
     </div>
   )
 }
+
+

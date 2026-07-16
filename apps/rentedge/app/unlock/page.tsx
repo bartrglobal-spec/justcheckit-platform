@@ -403,7 +403,21 @@ export default function UnlockPage() {
       .replace(/\s{2,}/g, ' ')
       .trim()
 
-    const area = p.area || ''
+    // Area now gets the same defensive cleaning as title. Previously this
+    // was used raw — if a scrape (or manual entry) ever put site names,
+    // IDs, or a full address blob into `area`, it flowed straight into the
+    // intro message with nothing to catch it. This is the safety net;
+    // /api/scrape is the actual fix for where the bad data came from.
+    const cleanArea = (p.area || '')
+      .replace(/property24/gi, '')
+      .replace(/\|.*$/, '')
+      .replace(/-?\s*p\d+.*$/i, '')
+      .replace(/r\s?\d[\d\s,]*/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^\d+\s+\S+.*$/, '') // drop street-address-looking values, e.g. "34 Cathedral Street"
+      .trim()
+
+    const area = cleanArea
 
     // If the cleaned title already contains the area name, don't set location
     // — prevents "I came across X in X" duplication in the intro message

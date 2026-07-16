@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 
-export type InsightCategory = 'opportunity' | 'strength' | 'agent' | 'resource'
+export type InsightCategory = 'opportunity' | 'strength' | 'agent' | 'resource' | 'faq'
 
 const CATEGORY_META: Record<InsightCategory, { glyph: string; colour: string }> = {
   opportunity: { glyph: '◎', colour: 'var(--gold-text)' },
   strength:    { glyph: '↑', colour: 'var(--success)' },
   agent:       { glyph: '◈', colour: 'var(--accent-primary)' },
   resource:    { glyph: '▤', colour: 'var(--text-muted)' },
+  faq:         { glyph: '?', colour: 'var(--text-muted)' },
 }
 
 // Collapsed by default — title alone is meant to be scannable on its own.

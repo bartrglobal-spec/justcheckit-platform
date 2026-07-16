@@ -18,10 +18,11 @@ export default function CheckPage() {
   const [extracting, setExtracting] = useState(false)
   const [extractMessage, setExtractMessage] = useState('')
   const [extractOk, setExtractOk] = useState(false)
-  const [showAddProperty, setShowAddProperty] = useState(false)
+  const [showAddProperty, setShowAddProperty] = useState(true)
   const [editingPropertyId, setEditingPropertyId] = useState<number | null>(null)
   const [editValues, setEditValues] = useState({ title: '', area: '', rent: '', bedrooms: '' })
   const [current, setCurrent] = useState({ link: '', title: '', area: '', rent: '', bedrooms: '' })
+  const [justAddedId, setJustAddedId] = useState<number | null>(null)
 
   const hasLoaded = useRef(false)
 
@@ -38,6 +39,11 @@ export default function CheckPage() {
           bedrooms: Number(p.bedrooms),
         }))
       )
+      // Returning visitor already has properties — no need to force the
+      // form open. First-time visitors (saved.length === 0) keep the
+      // showAddProperty default of true set above, so the form is already
+      // visible on first load and there's always something to type into.
+      setShowAddProperty(false)
     }
     hasLoaded.current = true
   }, [])
@@ -73,7 +79,10 @@ export default function CheckPage() {
       setExtractMessage('Details found — check everything before saving.')
     } catch {
       setExtractOk(false)
-      setExtractMessage('Could not extract details. Fill in manually below.')
+      // Made more explicit than the previous "Could not extract details" —
+      // this is the moment people were most likely to sit there re-tapping
+      // Fill or wondering if anything happened, per the recordings review.
+      setExtractMessage("Couldn't read that link — no problem, just fill in the details below.")
     } finally {
       setExtracting(false)
     }
@@ -95,11 +104,13 @@ export default function CheckPage() {
     setExtractMessage('')
     setExtractOk(false)
     setShowAddProperty(false)
+    setJustAddedId(property.id)
   }
 
   // ─── Remove / Edit ────────────────────────────────────
   const removeProperty = (id: number) => {
     if (editingPropertyId === id) setEditingPropertyId(null)
+    if (justAddedId === id) setJustAddedId(null)
     setProperties(prev => prev.filter(p => p.id !== id))
   }
 
@@ -130,8 +141,9 @@ export default function CheckPage() {
   }
 
   // ─── Guidance copy ────────────────────────────────────
+  // Now only used for the 3-4-5 states, since the 0 and 1-2 states are
+  // covered by the reassurance strip and the post-add confirmation below.
   const guidanceText = () => {
-    if (properties.length === 0) return 'Add at least one property to get started.'
     if (properties.length <= 2) return 'Add a few more to compare your options.'
     if (properties.length < 5) return 'Good comparison set. Add more or continue.'
     return 'Property limit reached. Continue to build your profile.'
@@ -149,27 +161,52 @@ export default function CheckPage() {
           Target Properties
         </h1>
         <p className="section-subtitle">
-          Add the rentals you are seriously considering. We will compare them once your profile is complete.
+          Add the rentals you are seriously considering. We'll ask about your situation next, then compare it against these.
         </p>
       </section>
 
-      {/* ─── Counter + guidance ─── */}
-      <div className="card-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <span className="body-text" style={{ color: 'var(--text-muted)', fontSize: 13 }}>
-          {guidanceText()}
-        </span>
-        <span
-          className="app-badge"
-          style={{
-            flexShrink: 0,
-            color: properties.length >= 3 ? 'var(--success)' : 'var(--text-muted)',
-            borderColor: properties.length >= 3 ? 'var(--success-border)' : undefined,
-            background: properties.length >= 3 ? 'var(--success-soft)' : undefined,
-          }}
-        >
-          {properties.length} / 5
-        </span>
+      {/* ─── Trust reassurance ─── */}
+      {/* Carries forward the same promise made on the homepage — without
+          this, a visitor who was told "nothing stored" there has no
+          confirmation this page still honours that before they start
+          typing rent and area details. */}
+      <div className="card-inner" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.5 }}>
+          No account, nothing stored. Everything you add here stays on your device.
+        </p>
       </div>
+
+      {/* ─── Post-add confirmation ─── */}
+      {/* Shown once, right after the first property is saved — this is the
+          "did that work, what now?" moment, which is a more valuable place
+          for guidance than upfront instructions on an empty form. */}
+      {justAddedId !== null && !showAddProperty && (
+        <div className="card-success">
+          <p className="body-text" style={{ fontSize: 13, color: 'var(--success)' }}>
+            Property added. Add another to compare, or continue whenever you're ready.
+          </p>
+        </div>
+      )}
+
+      {/* ─── Counter + guidance (only once at least one property exists) ─── */}
+      {properties.length > 0 && (
+        <div className="card-inner" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <span className="body-text" style={{ color: 'var(--text-muted)', fontSize: 13 }}>
+            {guidanceText()}
+          </span>
+          <span
+            className="app-badge"
+            style={{
+              flexShrink: 0,
+              color: properties.length >= 3 ? 'var(--success)' : 'var(--text-muted)',
+              borderColor: properties.length >= 3 ? 'var(--success-border)' : undefined,
+              background: properties.length >= 3 ? 'var(--success-soft)' : undefined,
+            }}
+          >
+            {properties.length} / 5
+          </span>
+        </div>
+      )}
 
       {/* ─── Property list ─── */}
       {properties.length > 0 && (
@@ -259,11 +296,11 @@ export default function CheckPage() {
       <section>
         {!showAddProperty && properties.length < 5 && (
           <button
-            onClick={() => setShowAddProperty(true)}
+            onClick={() => { setShowAddProperty(true); setJustAddedId(null) }}
             className="btn-secondary"
             style={{ borderStyle: 'dashed' }}
           >
-            + Add Property
+            + Add {properties.length > 0 ? 'another' : 'a'} property
           </button>
         )}
 
@@ -272,11 +309,12 @@ export default function CheckPage() {
             <div>
               <p className="section-title" style={{ fontSize: 15 }}>Add a property</p>
               <p className="section-subtitle" style={{ marginTop: 4 }}>
-                Paste a listing URL to autofill, or enter details manually.
+                Paste a listing link, or type in the details.
               </p>
             </div>
 
-            {/* URL autofill */}
+            {/* URL autofill — primary path, since most visitors already
+                have a specific listing in mind */}
             <div style={{ display: 'flex', gap: 10 }}>
               <input
                 placeholder="Paste listing URL (optional)"
@@ -309,7 +347,15 @@ export default function CheckPage() {
               </div>
             )}
 
-            <div className="divider" />
+            {/* Explicit divider — signals "these are alternatives", not a
+                second required section stacked under the first */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
+              <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', letterSpacing: '0.04em', textTransform: 'uppercase' }}>
+                or enter manually
+              </span>
+              <div style={{ flex: 1, height: 1, background: 'var(--border-soft)' }} />
+            </div>
 
             {/* Manual fields */}
             <input
@@ -351,17 +397,19 @@ export default function CheckPage() {
               >
                 Save Property
               </button>
-              <button
-                onClick={() => {
-                  setShowAddProperty(false)
-                  setExtractMessage('')
-                  setExtractOk(false)
-                }}
-                className="btn-secondary"
-                style={{ width: 'auto', padding: '15px 18px' }}
-              >
-                Cancel
-              </button>
+              {properties.length > 0 && (
+                <button
+                  onClick={() => {
+                    setShowAddProperty(false)
+                    setExtractMessage('')
+                    setExtractOk(false)
+                  }}
+                  className="btn-secondary"
+                  style={{ width: 'auto', padding: '15px 18px' }}
+                >
+                  Cancel
+                </button>
+              )}
             </div>
           </div>
         )}

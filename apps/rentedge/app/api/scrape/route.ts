@@ -71,10 +71,8 @@ export async function POST(req: Request) {
     }
 
     // -------------------------
-    // TITLE FIX (IMPORTANT)
+    // RAW TITLE
     // -------------------------
-    let location = "";
-
     let rawTitle = ogTitle;
 
     // ❌ REJECT og:title if it looks like a price
@@ -90,18 +88,70 @@ export async function POST(req: Request) {
       }
     }
 
+    // -------------------------
+    // KNOWN SITE NAMES
+    // -------------------------
+    // Extend this list as you support more listing sites. Matched as a
+    // trailing " - SiteName" segment or standalone, case-insensitive.
+    const SITE_NAMES = ["Property24", "Private Property", "PropertyJunction"];
+
+    const stripSiteName = (s: string) => {
+      let out = s;
+      for (const site of SITE_NAMES) {
+        const escaped = site.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        out = out.replace(new RegExp(`\\s*-\\s*${escaped}\\s*`, "gi"), " ");
+        out = out.replace(new RegExp(escaped, "gi"), "");
+      }
+      return out.trim();
+    };
+
+    // -------------------------
+    // TITLE (cleaned, full descriptive phrase)
+    // -------------------------
+    let title = "";
     if (rawTitle) {
-      location = rawTitle
-        .replace(/\|.*$/, "")                 // remove site name
-        .replace(/-?\s*p\d+.*$/i, "")         // remove IDs
-        .replace(/to rent/gi, "")
-        .replace(/for rent/gi, "")
-        .replace(/r\s?\d[\d\s]*/gi, "")       // remove price from title
-        .replace(/\s+/g, " ")
+      title = stripSiteName(rawTitle)
+        .replace(/-?\s*p\d+.*$/i, "")       // trailing listing IDs, e.g. "-P12345"
+        .replace(/r\s?\d[\d\s,]*/gi, "")    // price if it slipped into the title
+        .replace(/\s{2,}/g, " ")
+        .replace(/\s*-\s*$/, "")            // trailing dangling dash left by cleanup above
         .trim();
     }
 
+    // -------------------------
+    // LOCATION / AREA (short suburb, not the full title)
+    // -------------------------
+    // Property listing titles are typically either:
+    //   "<Description> in <Suburb> - Property24"
+    //   "<Description> - <Street address> - <Suburb> - Property24"
+    // We split on " - ", drop the site name and anything that looks like a
+    // street address (starts with a number), then prefer the last remaining
+    // segment — unless it still contains " in ", in which case the real
+    // suburb is whatever follows the last " in ".
+    let location = "";
+    if (title) {
+      const segments = title
+        .split(" - ")
+        .map(s => s.trim())
+        .filter(Boolean)
+        .filter(s => !/^\d/.test(s)); // drop street-address-looking segments
+
+      if (segments.length > 0) {
+        const candidate = segments[segments.length - 1];
+        const inMatch = candidate.match(/\bin\s+(.+)$/i);
+        location = (inMatch ? inMatch[1] : candidate).trim();
+      }
+
+      // Fallback: if segment-splitting produced nothing usable, try
+      // extracting straight from the full title via " in <suburb>"
+      if (!location) {
+        const inMatch = title.match(/\bin\s+([^-]+)$/i);
+        if (inMatch) location = inMatch[1].trim();
+      }
+    }
+
     return NextResponse.json({
+      title,
       price,
       location,
       bedrooms,
