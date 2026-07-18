@@ -1,40 +1,24 @@
 export type RenterProfile = {
   income: number
-
   additionalIncome?: number
-
   employment: string
-
   duration: string
-
   occupants: number
-
   pets?: boolean
-
   petType?: string
-
   petSize?: "small" | "medium" | "large"
-
   smoking?: boolean
-
   leasePreference?: string
-
   moveTimeline?: string
-
   depositReady?: boolean
-
   idReady?: boolean
-
   payslipReady?: boolean
-
   bankStatementsReady?: boolean
-
+  employmentConfirmationReady?: boolean   // NEW — was checked directly against raw profile in page.tsx, now a real field
   referencesReady?: boolean
-
   guarantorAvailable?: boolean
-
+  guarantorStatus?: 'yes' | 'possibly' | 'no'   // NEW — lets callers distinguish "possibly" from "no" without re-parsing raw profile
   creditIssues?: string
-
   evictionHistory?: string
 }
 

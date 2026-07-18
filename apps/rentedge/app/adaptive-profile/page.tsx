@@ -41,6 +41,24 @@ const EMPTY_ANSWERS: ProfileAnswers = {
   guarantorSupport: '',
 }
 
+// Human-readable labels used by the progress header and the "editing"
+// state — separate from the longer labels used in the answered-items list
+// below, since these need to fit on one line next to a Back/Cancel button.
+const QUESTION_LABELS: Record<string, string> = {
+  incomeSource: 'Income source',
+  incomeStructure: 'Income structure',
+  monthlyIncome: 'Monthly income',
+  employmentStability: 'Stability',
+  rentalHistory: 'Rental history',
+  referenceLikelihood: 'Reference likelihood',
+  referenceAvailability: 'References',
+  occupancy: 'Occupancy',
+  moveTiming: 'Move timing',
+  depositReadiness: 'Deposit',
+  documentationGaps: 'Documentation',
+  guarantorSupport: 'Guarantor',
+}
+
 export default function AdaptiveProfilePage() {
   const router = useRouter()
   const [properties, setProperties] = useState<Property[]>([])
@@ -106,6 +124,27 @@ export default function AdaptiveProfilePage() {
   })
 
   const profileComplete = !currentQuestion
+
+  // Explains, on the question itself, why a branch-only question showed up
+  // — otherwise a question appearing that wasn't there a moment ago can
+  // read as the form getting longer rather than getting smarter.
+  const branchReason: Partial<Record<string, string>> = {}
+  if (needsReferences) {
+    branchReason.referenceLikelihood = "Asked because you've rented before"
+    branchReason.referenceAvailability = "Asked because you've rented before"
+  }
+  if (needsGuarantor) {
+    branchReason.guarantorSupport =
+      answers.incomeSource === 'Student'
+        ? "Asked because you're a student"
+        : answers.rentalHistory === 'First-time renter'
+        ? "Asked because this is your first time renting"
+        : "Asked because affordability looks tight for the properties you're tracking"
+  }
+
+  const isEditing = Boolean(editingField)
+  const currentIndex = currentQuestion ? questionQueue.indexOf(currentQuestion) : -1
+  const previousKey = !isEditing && currentIndex > 0 ? questionQueue[currentIndex - 1] : null
 
   const updateAnswer = (field: keyof ProfileAnswers, value: any) => {
     setAnswers(prev => ({ ...prev, [field]: value }))
@@ -189,23 +228,6 @@ export default function AdaptiveProfilePage() {
         <p className="section-subtitle">Let's understand your rental position against the properties you are targeting.</p>
       </section>
 
-      <div className="card card-elevated">
-        <p className="label">Property market</p>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-          {[
-            { label: 'Tracked',      value: String(properties.length) },
-            { label: 'Highest rent', value: `R${highestRent.toLocaleString()}` },
-            { label: 'Lowest rent',  value: `R${lowestRent.toLocaleString()}` },
-            { label: 'Average rent', value: `R${averageRent.toLocaleString()}` },
-          ].map(item => (
-            <div key={item.label} className="card-inner">
-              <p className="label">{item.label}</p>
-              <p className="section-title" style={{ marginTop: 6, fontSize: 17 }}>{item.value}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-
       <div className="card-accent">
         <p className="label">Guidance</p>
         <p className="body-text" style={{ marginTop: 8 }}>{guidance}</p>
@@ -213,7 +235,56 @@ export default function AdaptiveProfilePage() {
 
       {!profileComplete && (
         <div className="card card-elevated">
-          <p className="label" style={{ marginBottom: 14, color: 'var(--accent-primary)' }}>Next question</p>
+
+          {/* Progress / edit header — replaces the old static "Next question"
+              label. In the normal forward flow this shows a growing
+              progress bar (grows when a branch adds a question, rather than
+              lying with a fixed total) plus a Back button to the previous
+              question. When editing a past answer from the list below, it
+              switches to a simple "Editing: X" + Cancel affordance instead,
+              since forward progress doesn't apply there. */}
+          {isEditing ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <p className="label" style={{ color: 'var(--accent-primary)' }}>
+                Editing: {QUESTION_LABELS[editingField!] || editingField}
+              </p>
+              <button onClick={() => setEditingField(null)} className="btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <p className="label" style={{ color: 'var(--accent-primary)' }}>
+                  Question {currentIndex + 1}
+                </p>
+                {previousKey && (
+                  <button onClick={() => setEditingField(previousKey)} className="btn-ghost" style={{ fontSize: 12, padding: '4px 10px' }}>
+                    ← Back
+                  </button>
+                )}
+              </div>
+              <div style={{ display: 'flex', gap: 4, marginTop: 8 }}>
+                {questionQueue.map((q, i) => (
+                  <div key={q} style={{
+                    flex: 1, height: 4, borderRadius: 2,
+                    background: i < currentIndex ? 'var(--success)' : i === currentIndex ? 'var(--accent-primary)' : 'var(--border-soft)',
+                  }} />
+                ))}
+              </div>
+              {currentQuestion && branchReason[currentQuestion] && (
+                <div style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10,
+                  padding: '5px 10px', borderRadius: 'var(--radius-pill)',
+                  background: 'var(--accent-soft)', border: '1px solid var(--accent-border)',
+                }}>
+                  <span style={{ fontSize: 11, color: 'var(--accent-primary)' }}>
+                    ✦ {branchReason[currentQuestion]}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
 
           {currentQuestion === 'incomeSource' && (<>
             <p className="section-title">How do you currently earn your income?</p>
@@ -236,7 +307,7 @@ export default function AdaptiveProfilePage() {
           {currentQuestion === 'monthlyIncome' && (<>
             <p className="section-title">What is your average monthly income before deductions?</p>
             <p className="section-subtitle" style={{ marginTop: 4 }}>
-              Enter your gross monthly amount. We use this to check the 3x income rule agents apply.
+              Enter your gross monthly amount. We use this to check the income-to-rent ratio agents look at.
             </p>
             <input
               value={incomeBuffer}
@@ -380,6 +451,23 @@ export default function AdaptiveProfilePage() {
 
         </div>
       )}
+
+      <div className="card card-elevated">
+        <p className="label">Property market</p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
+          {[
+            { label: 'Tracked',      value: String(properties.length) },
+            { label: 'Highest rent', value: `R${highestRent.toLocaleString()}` },
+            { label: 'Lowest rent',  value: `R${lowestRent.toLocaleString()}` },
+            { label: 'Average rent', value: `R${averageRent.toLocaleString()}` },
+          ].map(item => (
+            <div key={item.label} className="card-inner">
+              <p className="label">{item.label}</p>
+              <p className="section-title" style={{ marginTop: 6, fontSize: 17 }}>{item.value}</p>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {answeredItems.length > 0 && (
         <div className="card">

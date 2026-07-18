@@ -1,9 +1,11 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { evaluateProperty } from '@/lib/evaluation'
+import { evaluateProperties } from '@/lib/evaluation/portfolio'
 import { evaluateUnlock } from '@/lib/evaluation/unlock'
+import { getAffordabilityThresholds, getPropertyClass } from '@/lib/evaluation/helpers'
 import posthog from 'posthog-js'
 import PdfCaptureModal from './PdfCaptureModal'
 import PropertyHeader from './PropertyHeader'
@@ -54,6 +56,40 @@ function cleanTitle(value?: string) {
     .trim()
 }
 
+// Upfront costs shown on Overview. Deposit is estimated at 1.5x-2x rent
+// (typical local range), first month is the rent itself, admin fee is a
+// flat estimate since the profile doesn't currently capture a specific
+// agency's fee. The headline total uses the low end of each range with a
+// "+" suffix, since the true number depends on the specific landlord.
+function computeUpfrontCosts(rent: number) {
+  const depositLow = Math.round(rent * 1.5)
+  const depositHigh = rent * 2
+  const firstMonth = rent
+  const adminLow = 800
+  const adminHigh = 1200
+  const total = depositLow + firstMonth + adminLow
+  return { depositLow, depositHigh, firstMonth, adminLow, adminHigh, total }
+}
+
+const FINANCIAL_STRENGTH_LABEL: Record<string, string> = {
+  strong: 'Strong',
+  stable: 'Stable',
+  stretched: 'Stretched',
+  pressured: 'Pressured',
+}
+
+const FIT_LABEL: Record<string, string> = {
+  strong: 'Strong',
+  borderline: 'Competitive',
+  weak: 'Needs work',
+}
+
+const FIT_COLOUR: Record<string, string> = {
+  strong: 'var(--success)',
+  borderline: 'var(--warning)',
+  weak: 'var(--danger)',
+}
+
 // ── PDF payload helpers ─────────────────────────────────────
 // depositReadiness only ever holds these three exact strings from the
 // adaptive profile question — never a specific rand amount.
@@ -66,9 +102,13 @@ function mapDepositStatus(value: string): 'ready' | 'partial' | 'not-ready' {
 // guarantorSupport and referenceAvailability are status-only fields — no
 // contact details are captured anywhere in the profile — so these produce
 // plain status sentences rather than inventing contact info that isn't there.
-function buildGuarantorText(value: string): string {
-  if (value === 'Yes') return 'A guarantor is available if required.'
-  if (value === 'Possibly') return 'Guarantor support may be available — happy to confirm if needed.'
+// Now reads the resolved status from renter.guarantorStatus (built once in
+// buildRenterProfile) instead of re-parsing the raw profile answer here —
+// previously this and the readiness engine could disagree on what
+// "Possibly" meant.
+function buildGuarantorText(status: 'yes' | 'possibly' | 'no'): string {
+  if (status === 'yes') return 'A guarantor is available if required.'
+  if (status === 'possibly') return 'Guarantor support may be available — happy to confirm if needed.'
   return 'No guarantor currently arranged.'
 }
 
@@ -93,6 +133,29 @@ function CopyBtn({ text, label = 'Copy introduction message' }: { text: string; 
     >
       {copied ? '✓ Copied to clipboard' : label}
     </button>
+  )
+}
+
+// ── Affordability dial — real gauge, real ratio, used in the switcher and explorer ──
+function AffordabilityDial({ ratio, size = 70, highlight = false }: { ratio: number; size?: number; highlight?: boolean }) {
+  const gradientId = useId()
+  const clamped = Math.max(0, Math.min(ratio, 5))
+  const angle = (clamped / 5) * 180 - 90
+  const height = size * (40 / 70)
+  return (
+    <svg width={size} height={height} viewBox="0 0 70 40" role="img" aria-label={`Affordability dial, ${ratio.toFixed(1)} times rent`}>
+      <defs>
+        <linearGradient id={gradientId} x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stopColor="#E24B4A" />
+          <stop offset="35%" stopColor="#EF9F27" />
+          <stop offset="65%" stopColor="#639922" />
+          <stop offset="100%" stopColor="#1D9E75" />
+        </linearGradient>
+      </defs>
+      <path d="M 5 35 A 30 30 0 0 1 65 35" fill="none" stroke={`url(#${gradientId})`} strokeWidth={highlight ? 6 : 5} strokeLinecap="round" />
+      <line x1="35" y1="35" x2="24" y2="14" stroke="#fff" strokeWidth={2} strokeLinecap="round" transform={`rotate(${angle} 35 35)`} />
+      <circle cx="35" cy="35" r="2.5" fill="#fff" />
+    </svg>
   )
 }
 
@@ -312,6 +375,15 @@ export default function UnlockPage() {
   // payment, not just localStorage on the client.
   const [unlockState, setUnlockState] = useState<{ all: boolean; propertyIds: number[] }>({ all: false, propertyIds: [] })
 
+  // ── Explorer state ────────────────────────────────────
+  // Drives the "explore your affordability" section on Overview. Starts out
+  // null so it can be seeded from the real profile once it loads; every
+  // recalculation calls the real evaluateProperty/evaluateProperties
+  // functions with this hypothetical income instead of approximating the
+  // math client-side, so the numbers shown are always genuinely correct.
+  const [exploreIncome, setExploreIncome] = useState<number | null>(null)
+  const [exploreGuarantor, setExploreGuarantor] = useState(false)
+
   useEffect(() => {
     const savedProfile    = JSON.parse(localStorage.getItem('rentedge_profile_answers') || 'null')
     const savedProperties = JSON.parse(localStorage.getItem('rentedge_properties') || '[]')
@@ -330,6 +402,13 @@ export default function UnlockPage() {
     if (savedAgent) setReferringAgent(savedAgent)
     setReady(true)
   }, [])
+
+  useEffect(() => {
+    if (ready && profile && exploreIncome === null) {
+      setExploreIncome(Number(profile?.monthlyIncome || 0))
+      setExploreGuarantor(profile?.guarantorSupport === 'Yes')
+    }
+  }, [ready, profile, exploreIncome])
 
   const persistUnlockState = (next: { all: boolean; propertyIds: number[] }) => {
     setUnlockState(next)
@@ -445,18 +524,16 @@ export default function UnlockPage() {
   const income      = renter.income
   const ratio       = income > 0 && rent > 0 ? income / rent : 0
   const rentBurden  = income > 0 ? Math.round((rent / income) * 100) : 0
-  const isSelfEmpl  = ['self', 'freelance', 'contract'].some(k =>
-    (profile?.incomeSource || '').toLowerCase().includes(k))
 
-  const posLabel =
-    evaluation.fit === 'strong'     ? 'Strong'
-    : evaluation.fit === 'borderline' ? 'Competitive'
-    : 'Needs work'
+  // Now reads renter.employment directly instead of re-matching keywords
+  // against the raw profile.incomeSource — renter.employment is already
+  // normalized to "self-employed" for self-employed/freelance/contract by
+  // buildRenterProfile, so this now agrees with what the scoring engine
+  // (getFinancialRank / evaluatePressure) actually used.
+  const isSelfEmpl  = renter.employment === 'self-employed'
 
-  const posColour =
-    evaluation.fit === 'strong'     ? 'var(--success)'
-    : evaluation.fit === 'borderline' ? 'var(--warning)'
-    : 'var(--danger)'
+  const posLabel  = FIT_LABEL[evaluation.fit]
+  const posColour = FIT_COLOUR[evaluation.fit]
 
   const posBg =
     evaluation.fit === 'strong'     ? 'var(--success-soft)'
@@ -474,10 +551,43 @@ export default function UnlockPage() {
     { doc: 'Certified ID copy',                                              done: !gaps.includes('ID Document') },
     { doc: isSelfEmpl ? '6 months bank statements' : '3 months bank statements', done: !gaps.includes('Bank Statements') },
     { doc: isSelfEmpl ? '6 months payslips or financial statements' : '3 months payslips', done: !gaps.includes('Payslips') },
-    { doc: 'Employment confirmation letter',                                 done: !gaps.includes('Employment Confirmation') },
-    { doc: 'Landlord reference contact details',                             done: profile?.referenceAvailability === 'Available' },
+    // These two now read the resolved renter fields (built once in
+    // buildRenterProfile) instead of re-checking raw profile fields here —
+    // this is the same 6-document count the evaluation engine's
+    // readinessProfile now uses, so the header's "X of 6" and the engine's
+    // internal readiness always describe the same 6 things.
+    { doc: 'Employment confirmation letter',                                 done: renter.employmentConfirmationReady },
+    { doc: 'Landlord reference contact details',                             done: renter.referencesReady },
     { doc: `Deposit ready — up to R${(rent * 2).toLocaleString()} (2x rent)`, done: profile?.depositReadiness === 'Yes' },
   ]
+
+  const docsReadyCount = docList.filter(d => d.done).length
+  const docsTotal = docList.length
+  const depositStatus = mapDepositStatus(profile?.depositReadiness)
+
+  // ── Overview additions: real per-property thresholds, upfront costs, explorer ──
+  const propertyClass = getPropertyClass(selectedInput)
+  const thresholds = getAffordabilityThresholds(propertyClass)
+  const upfrontCosts = computeUpfrontCosts(rent)
+
+  const effectiveIncome = exploreIncome ?? renter.income
+  const exploreRenter = {
+    ...renter,
+    income: effectiveIncome,
+    guarantorAvailable: exploreGuarantor,
+    guarantorStatus: (exploreGuarantor ? 'yes' : 'no') as 'yes' | 'no',
+  }
+  const explorePortfolio = evaluateProperties(exploreRenter, propertiesInput)
+  const exploreSelected =
+    explorePortfolio.find(e => e.property.id === selectedProperty.id) || explorePortfolio[0]
+
+  const maxScale = thresholds.strong * 1.4
+  const barPct = (v: number) => Math.min(Math.max(v, 0) / maxScale, 1) * 100
+  const barGradient =
+    `linear-gradient(to right, #E24B4A 0%, #E24B4A ${barPct(thresholds.stretched)}%, ` +
+    `#EF9F27 ${barPct(thresholds.stretched)}%, #EF9F27 ${barPct(thresholds.stable)}%, ` +
+    `#8BC34A ${barPct(thresholds.stable)}%, #8BC34A ${barPct(thresholds.strong)}%, ` +
+    `#1D9E75 ${barPct(thresholds.strong)}%, #1D9E75 100%)`
 
   // Builds the real payload from the same data already driving this page,
   // calls the PDF API, and triggers a browser download of the result.
@@ -497,11 +607,14 @@ export default function UnlockPage() {
           idReady: renter.idReady,
           bankStatementsReady: renter.bankStatementsReady,
           payslipsReady: renter.payslipReady,
-          employmentConfirmationReady: !gaps.includes('Employment Confirmation'),
+          employmentConfirmationReady: renter.employmentConfirmationReady,
           referenceReady: renter.referencesReady,
           depositStatus: mapDepositStatus(profile?.depositReadiness),
         },
-        guarantorText: buildGuarantorText(profile?.guarantorSupport),
+        // Now passes the resolved renter.guarantorStatus instead of the raw
+        // profile.guarantorSupport string — buildGuarantorText's signature
+        // changed to match.
+        guarantorText: buildGuarantorText(renter.guarantorStatus),
         referenceContactText: buildReferenceContactText(profile?.referenceAvailability),
         introMessage: unlock.introduction.introduction,
       }
@@ -530,10 +643,6 @@ export default function UnlockPage() {
       setPdfDownloading(false)
     }
   }
-
-  const docsReadyCount = docList.filter(d => d.done).length
-  const docsTotal = docList.length
-  const depositStatus = mapDepositStatus(profile?.depositReadiness)
 
   const isUnlocked = BETA_FREE_ACCESS || unlockState.all || unlockState.propertyIds.includes(selectedProperty.id)
 
@@ -620,6 +729,152 @@ export default function UnlockPage() {
       {activeTab === 'overview' && (
         <div className="section-gap">
 
+          {/* Verdict headline — leads with a sentence, not a number */}
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--text-secondary)', margin: 0 }}>
+              {cleanTitle(selectedProperty.area || selectedProperty.title)} · R{rent.toLocaleString()}/mo
+            </p>
+            <p className="section-title" style={{ marginTop: 4 }}>{posLabel} fit for this property</p>
+          </div>
+
+          {/* Do this first — the single top-ranked gap from the engine, always
+              visible, never behind a tap. */}
+          {unlock.focusAreas[0] && (
+            <div className="card" style={{
+              border: '1px solid var(--gold-border)',
+              background: 'linear-gradient(150deg, rgba(201,168,76,0.10) 0%, rgba(201,168,76,0.03) 100%)',
+            }}>
+              <p className="app-eyebrow" style={{ color: 'var(--gold-text)' }}>Do this first</p>
+              <p style={{ fontSize: 16, fontWeight: 600, marginTop: 8, lineHeight: 1.4, color: 'var(--text-primary)' }}>
+                {unlock.focusAreas[0].what}
+              </p>
+              <p className="body-text" style={{ marginTop: 8 }}>{unlock.focusAreas[0].why}</p>
+            </div>
+          )}
+
+          {/* Readiness snapshot — documents, deposit, and real upfront costs,
+              all visible without a tap. */}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 12 }}>
+            <div className="card-inner">
+              <p className="label">Documents</p>
+              <p style={{ fontSize: 24, fontWeight: 700, marginTop: 4 }}>{docsReadyCount} of {docsTotal}</p>
+            </div>
+            <div className="card-inner" style={{ background: 'var(--success-soft)', border: '1px solid var(--success-border)' }}>
+              <p className="label" style={{ color: 'var(--success)' }}>Deposit</p>
+              <p style={{ fontSize: 24, fontWeight: 700, marginTop: 4, color: 'var(--success)' }}>
+                {depositStatus === 'ready' ? 'Ready' : depositStatus === 'partial' ? 'Partial' : 'Not ready'}
+              </p>
+            </div>
+          </div>
+
+          <div className="card-inner">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+              <p className="label">Upfront costs to have ready</p>
+              <p style={{ fontSize: 20, fontWeight: 700 }}>R{upfrontCosts.total.toLocaleString()}+</p>
+            </div>
+            <p className="body-text" style={{ marginTop: 8, fontSize: 12 }}>
+              Deposit R{upfrontCosts.depositLow.toLocaleString()}–R{upfrontCosts.depositHigh.toLocaleString()}
+              {' · '}first month R{upfrontCosts.firstMonth.toLocaleString()}
+              {' · '}admin R{upfrontCosts.adminLow.toLocaleString()}–R{upfrontCosts.adminHigh.toLocaleString()}
+            </p>
+          </div>
+
+          {/* Property switcher — real dial per tracked property, driven by
+              evaluateProperties, not a flat inline ratio. */}
+          {properties.length > 0 && (
+            <div>
+              <p className="label" style={{ marginBottom: 8 }}>Your tracked properties</p>
+              <div style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 6 }}>
+                {explorePortfolio.map(({ property, evaluation: pe }) => {
+                  const isSelected = property.id === selectedProperty.id
+                  return (
+                    <div
+                      key={property.id}
+                      onClick={() => property.id !== undefined && selectProperty(property.id)}
+                      style={{
+                        flex: '0 0 auto', minWidth: 104, borderRadius: 'var(--radius-card)',
+                        padding: '10px 12px', cursor: 'pointer',
+                        border: isSelected ? '2px solid var(--gold-border)' : '1px solid var(--border-soft)',
+                        background: isSelected ? 'rgba(201,168,76,0.08)' : 'rgba(255,255,255,0.03)',
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'center' }}>
+                        <AffordabilityDial ratio={pe.affordabilityRatio} size={64} highlight={isSelected} />
+                      </div>
+                      <p style={{ fontSize: 14, fontWeight: 600, textAlign: 'center', marginTop: 2 }}>
+                        {pe.affordabilityRatio.toFixed(1)}x
+                      </p>
+                      <p style={{
+                        fontSize: 11, color: 'var(--text-muted)', textAlign: 'center', marginTop: 2,
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {cleanTitle(property.label)}
+                      </p>
+                      <p style={{ fontSize: 10.5, textAlign: 'center', marginTop: 2, color: FIT_COLOUR[pe.fit] }}>
+                        {FIT_LABEL[pe.fit]}
+                      </p>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Affordability explorer — real evaluateProperty math, not a
+              client-side approximation. Guarantor toggle changes
+              readinessProfile + pressureScore the same way it does in the
+              real engine, so the shift shown here is the shift that
+              actually happens. */}
+          <div className="card-inner">
+            <p className="label" style={{ marginBottom: 8 }}>Explore your affordability</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <AffordabilityDial ratio={exploreSelected.evaluation.affordabilityRatio} size={130} highlight />
+              <p style={{ fontSize: 26, fontWeight: 700, marginTop: 4 }}>
+                {exploreSelected.evaluation.affordabilityRatio.toFixed(1)}x
+              </p>
+              <p className="body-text" style={{ fontSize: 12, textAlign: 'center', marginTop: 4 }}>
+                Financial strength: <strong>{FINANCIAL_STRENGTH_LABEL[exploreSelected.evaluation.financialStrength]}</strong>
+              </p>
+            </div>
+
+            <div style={{ position: 'relative', height: 8, borderRadius: 4, marginTop: 16, background: barGradient }}>
+              <div style={{
+                position: 'absolute', top: -3, width: 2, height: 14, background: '#fff',
+                left: `${barPct(exploreSelected.evaluation.affordabilityRatio)}%`,
+              }} />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 4 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>0x</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Strong at {thresholds.strong.toFixed(1)}x</span>
+            </div>
+
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
+                <label htmlFor="exploreIncome" style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  Try a different monthly income
+                </label>
+                <span style={{ fontSize: 14, fontWeight: 600 }}>R{effectiveIncome.toLocaleString()}</span>
+              </div>
+              <input
+                id="exploreIncome"
+                type="range"
+                min={5000}
+                max={Math.max(100000, renter.income * 2)}
+                step={500}
+                value={effectiveIncome}
+                onChange={(e) => setExploreIncome(Number(e.target.value))}
+                style={{ width: '100%', marginTop: 6 }}
+              />
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 10, fontSize: 13, color: 'var(--text-secondary)' }}>
+                <input type="checkbox" checked={exploreGuarantor} onChange={(e) => setExploreGuarantor(e.target.checked)} />
+                With a guarantor
+              </label>
+              <p style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 8 }}>
+                This is just exploring — it does not change your saved profile.
+              </p>
+            </div>
+          </div>
+
           {/* Observations — personalised by engine */}
           <div className="card card-elevated">
             <p className="app-eyebrow">What we noticed — specific to your situation</p>
@@ -640,41 +895,6 @@ export default function UnlockPage() {
               ))}
             </div>
           </div>
-
-          {/* Rent burden — user-specific calculation */}
-          {income > 0 && (
-            <div style={{
-              padding: '16px',
-              borderRadius: 'var(--radius-card)',
-              background: ratio >= 3 ? 'var(--success-soft)' : ratio >= 2.5 ? 'var(--warning-soft)' : 'var(--danger-soft)',
-              border: `1px solid ${ratio >= 3 ? 'var(--success-border)' : ratio >= 2.5 ? 'var(--warning-border)' : 'var(--danger-border)'}`,
-            }}>
-              <p className="label" style={{ color: ratio >= 3 ? 'var(--success)' : ratio >= 2.5 ? 'var(--warning)' : 'var(--danger)' }}>
-                Affordability — the first thing agents check
-              </p>
-              <p style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', marginTop: 8, letterSpacing: '-0.03em' }}>
-                {ratio.toFixed(1)}x
-              </p>
-              <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>
-                Your income is <strong>{ratio.toFixed(1)}x</strong> the rent. The rent takes <strong>{rentBurden}%</strong> of your gross income.
-                {' '}{ratio >= 3
-                  ? 'You meet the standard 3x threshold. Affordability is unlikely to be the main question for this property.'
-                  : ratio >= 2.5
-                  ? 'You are close to the 3x threshold. Some agents may approve, others may ask for a guarantor.'
-                  : 'Below the 3x threshold. This is the most likely point of friction for this specific property.'}
-              </p>
-              {ratio < 3 && (
-                <div className="card-inner" style={{ marginTop: 12 }}>
-                  <p className="label">What to do</p>
-                  <p className="body-text" style={{ marginTop: 6, fontSize: 13 }}>
-                    {ratio >= 2.5
-                      ? 'Consider adding a guarantor or targeting a property where your income meets 3x comfortably. Your other signals may compensate.'
-                      : 'Target properties under R' + Math.floor(income / 3).toLocaleString() + '/month where your income meets the threshold. A guarantor may also help.'}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Urgency framing — in a tight vacancy market, being first with a complete
               application often beats being the strongest applicant who's slow. */}
@@ -741,7 +961,7 @@ export default function UnlockPage() {
               depositReady={renter.depositReady}
               docList={docList}
               isSelfEmpl={isSelfEmpl}
-              referenceAvailable={profile?.referenceAvailability === 'Available'}
+              referenceAvailable={renter.referencesReady}
             />
           )}
 

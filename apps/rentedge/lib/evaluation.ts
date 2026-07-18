@@ -94,23 +94,33 @@ export function evaluateProperty(
     renter.idReady &&
     renter.payslipReady
 
-  const readinessCount = [
+  // Readiness now counts the same 6 documents shown to the user as
+  // "X of 6" in the page header (deposit, ID, payslips, bank statements,
+  // employment confirmation, references). Guarantor used to occupy one of
+  // the 6 slots here while the header counted employment confirmation
+  // instead — the two "X of 6" numbers could disagree. Guarantor is now a
+  // bonus on top of the same 6, so the on-screen count and this profile
+  // always describe the same 6 things.
+  const coreReadinessItems = [
     renter.depositReady,
     renter.idReady,
     renter.payslipReady,
     renter.bankStatementsReady,
+    renter.employmentConfirmationReady,
     renter.referencesReady,
-    renter.guarantorAvailable
-  ].filter(Boolean).length
+  ]
 
-  const readinessProfile =
-    readinessCount >= 5
-      ? "fully-prepared"
-      : readinessCount >= 3
-      ? "mostly-prepared"
-      : readinessCount >= 2
-      ? "moderately-prepared"
-      : "incomplete"
+  const coreReadinessCount =
+    coreReadinessItems.filter(Boolean).length
+
+  const readinessProfile = (() => {
+    const bonus = renter.guarantorAvailable ? 1 : 0
+    const effective = coreReadinessCount + bonus
+    if (effective >= 6) return "fully-prepared"
+    if (effective >= 4) return "mostly-prepared"
+    if (effective >= 2) return "moderately-prepared"
+    return "incomplete"
+  })()
 
   const stabilityConfidence =
     normalizeText(renter.duration)
