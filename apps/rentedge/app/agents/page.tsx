@@ -2,11 +2,6 @@
 
 import { useState } from 'react'
 
-// No backend/CRM wired up yet, so submitting opens a pre-filled email to
-// your inbox instead of hitting an API. Swap AGENT_CONTACT_EMAIL for your
-// real inbox, and once there's somewhere to actually store these leads
-// (a database, a CRM, even just a shared inbox with structure), this form
-// can post to a real endpoint instead.
 const AGENT_CONTACT_EMAIL = 'agents@rentedge.co.za' // TODO: confirm real inbox
 
 function BenefitCard({ title, text }: { title: string; text: string }) {
@@ -18,15 +13,46 @@ function BenefitCard({ title, text }: { title: string; text: string }) {
   )
 }
 
+function LinkRow({ label, value, hint }: { label: string; value: string; hint: string }) {
+  const [copied, setCopied] = useState(false)
+  return (
+    <div style={{ marginTop: 12 }}>
+      <p style={{ fontSize: 12, color: 'var(--success)', fontWeight: 600 }}>{label}</p>
+      <div style={{
+        marginTop: 6, padding: '10px 12px', borderRadius: 'var(--radius-sm)',
+        background: 'rgba(0,0,0,0.15)', border: '1px solid var(--success-border)',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+      }}>
+        <span style={{ fontSize: 13, color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {value}
+        </span>
+        <button
+          onClick={async () => {
+            await navigator.clipboard.writeText(value)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 2000)
+          }}
+          className="btn-ghost"
+          style={{ padding: '4px 10px', fontSize: 12, flexShrink: 0 }}
+        >
+          {copied ? '✓ Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="body-text" style={{ marginTop: 6, fontSize: 12 }}>{hint}</p>
+    </div>
+  )
+}
+
 export default function AgentsLandingPage() {
   const [name, setName] = useState('')
   const [agency, setAgency] = useState('')
   const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
   const [error, setError] = useState('')
-  const [sent, setSent] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{ slug: string; id: string } | null>(null)
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!name.trim()) {
       setError('Please enter your name.')
       return
@@ -37,14 +63,35 @@ export default function AgentsLandingPage() {
       return
     }
     setError('')
+    setSubmitting(true)
 
-    const subject = encodeURIComponent(`Agent signup — ${name.trim()}`)
-    const body = encodeURIComponent(
-      `Name: ${name.trim()}\nAgency: ${agency.trim() || 'Not provided'}\nEmail: ${email.trim()}\nPhone: ${phone.trim() || 'Not provided'}`
-    )
-    window.location.href = `mailto:${AGENT_CONTACT_EMAIL}?subject=${subject}&body=${body}`
-    setSent(true)
+    try {
+      const res = await fetch('/api/agents', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          agency: agency.trim(),
+          email: email.trim(),
+          phone: phone.trim(),
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setError(data?.error || 'Something went wrong. Please try again or email us directly.')
+        return
+      }
+      setResult({ slug: data.slug, id: data.id })
+    } catch {
+      setError(`Something went wrong. Please try again, or email us directly at ${AGENT_CONTACT_EMAIL}.`)
+    } finally {
+      setSubmitting(false)
+    }
   }
+
+  const origin = typeof window !== 'undefined' ? window.location.origin : ''
+  const referralLink = result ? `${origin}/r/${result.slug}` : ''
+  const dashboardLink = result ? `${origin}/agent-dashboard/${result.id}` : ''
 
   return (
     <div className="section-gap" style={{ paddingTop: 8 }}>
@@ -84,56 +131,47 @@ export default function AgentsLandingPage() {
           Leave your details and we'll set up your personal RentEdge link.
         </p>
 
-        {sent ? (
+        {result ? (
           <div style={{
             padding: '14px 16px', borderRadius: 'var(--radius-card)',
             background: 'var(--success-soft)', border: '1px solid var(--success-border)',
           }}>
             <p style={{ fontSize: 13, color: 'var(--success)', fontWeight: 600 }}>
-              Your email app should have opened with your details filled in.
+              You're set up.
             </p>
             <p className="body-text" style={{ marginTop: 6, fontSize: 12 }}>
-              If it didn't, email us directly at {AGENT_CONTACT_EMAIL}.
+              New agent links are reviewed before they go live — we'll activate yours shortly.
             </p>
+
+            <LinkRow
+              label="Your referral link — share this on listings"
+              value={referralLink}
+              hint="Every renter who arrives through this link is tagged as sent by you."
+            />
+            <LinkRow
+              label="Your private dashboard — bookmark this one"
+              value={dashboardLink}
+              hint="Only you have this link. It shows how many people have visited and reached out, no login needed. Don't share it publicly."
+            />
           </div>
         ) : (
           <>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <p className="label" style={{ marginBottom: 6 }}>Full name</p>
-                <input
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. John Smith"
-                  className="input"
-                />
+                <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. John Smith" className="input" />
               </div>
               <div>
                 <p className="label" style={{ marginBottom: 6 }}>Agency</p>
-                <input
-                  value={agency}
-                  onChange={(e) => setAgency(e.target.value)}
-                  placeholder="e.g. Smith & Co Properties"
-                  className="input"
-                />
+                <input value={agency} onChange={(e) => setAgency(e.target.value)} placeholder="e.g. Smith & Co Properties" className="input" />
               </div>
               <div>
                 <p className="label" style={{ marginBottom: 6 }}>Email address</p>
-                <input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder="e.g. john@smithco.co.za"
-                  className="input"
-                />
+                <input value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. john@smithco.co.za" className="input" />
               </div>
               <div>
                 <p className="label" style={{ marginBottom: 6 }}>Phone number</p>
-                <input
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="e.g. 082 123 4567"
-                  className="input"
-                />
+                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="e.g. 082 123 4567" className="input" />
               </div>
             </div>
 
@@ -141,8 +179,13 @@ export default function AgentsLandingPage() {
               <p style={{ color: 'var(--danger)', fontSize: 12.5, marginTop: 10 }}>{error}</p>
             )}
 
-            <button onClick={handleSubmit} className="btn-gold" style={{ marginTop: 16, width: '100%' }}>
-              Request my link
+            <button
+              onClick={handleSubmit}
+              className="btn-gold"
+              style={{ marginTop: 16, width: '100%', opacity: submitting ? 0.6 : 1 }}
+              disabled={submitting}
+            >
+              {submitting ? 'Submitting…' : 'Request my link'}
             </button>
           </>
         )}

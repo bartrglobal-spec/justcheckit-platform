@@ -3,28 +3,32 @@
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
-// No agent database yet — the slug in the URL *is* the source of truth for
-// the display name. "john-smith" -> "John Smith". Good enough for handing
-// a handful of test agents their own link without needing signup/auth.
-function slugToName(slug: string) {
-  return decodeURIComponent(slug)
-    .split('-')
-    .filter(Boolean)
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
-    .join(' ')
+type Props = {
+  agentSlug: string
+  agentName: string | null
+  agentPhone: string | null
+  agentEmail: string | null
 }
 
-export default function AgentCapture({ agentSlug }: { agentSlug: string }) {
+export default function AgentCapture({ agentSlug, agentName, agentPhone, agentEmail }: Props) {
   const router = useRouter()
 
   useEffect(() => {
-    const name = slugToName(agentSlug)
-    if (name) {
-      // Same key the Strategy tab's "Sending to: [Agent]" slot already reads.
-      localStorage.setItem('rentedge_referring_agent', name)
+    if (agentName) {
+      localStorage.setItem('rentedge_referring_agent', agentName)
+      // Slug specifically (not just the display name) so the unlock page
+      // can reliably attribute a "message sent" event back to the right
+      // agent record later, even if two agents share a similar name.
+      localStorage.setItem('rentedge_referring_agent_slug', agentSlug)
+    }
+    if (agentPhone) {
+      localStorage.setItem('rentedge_referring_agent_phone', agentPhone)
+    }
+    if (agentEmail) {
+      localStorage.setItem('rentedge_referring_agent_email', agentEmail)
     }
     router.replace('/check')
-  }, [agentSlug, router])
+  }, [agentSlug, agentName, agentPhone, agentEmail, router])
 
   return (
     <div style={{ minHeight: '60vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>

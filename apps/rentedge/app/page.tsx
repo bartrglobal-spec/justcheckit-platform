@@ -201,9 +201,22 @@ export default function LandingPage() {
 
         {/* ── Animated demo gauge ── */}
         <div className="card">
-          <p className="app-eyebrow" style={{ textAlign: 'center' }}>This is what you&apos;ll see</p>
+          {/* Explicit "example" tag added above the eyebrow — the cycling
+              numbers previously had no unambiguous marker that this isn't
+              the visitor's own computed result, which risked a false
+              sense of "I already got my answer" before they'd done anything. */}
+          <div style={{ display: 'flex', justifyContent: 'center' }}>
+            <span style={{
+              fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase',
+              color: 'var(--text-muted)', background: 'rgba(255,255,255,0.06)',
+              border: '1px solid var(--border-soft)', borderRadius: 'var(--radius-pill)', padding: '3px 10px',
+            }}>
+              Example result
+            </span>
+          </div>
+          <p className="app-eyebrow" style={{ textAlign: 'center', marginTop: 8 }}>This is what you&apos;ll see</p>
           <p style={{ fontSize: 12, color: 'var(--text-secondary)', textAlign: 'center', marginTop: 4, marginBottom: 4 }}>
-            A real read on where you stand — not a guess.
+            A sample — your real result is based on your own numbers, not this.
           </p>
           <HomeDemoGauge />
         </div>

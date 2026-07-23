@@ -49,7 +49,8 @@ const EMPTY_ANSWERS: ProfileAnswers = {
 // Flip this to false once Payfast checkout + the beta-code system are live.
 // The matching flag lives in /unlock's page.tsx — keep both in sync.
 // While true: pricing stays visible (for real intent-signal data), but
-// nobody is actually blocked or charged.
+// nobody is actually blocked or charged, and the free path is the visually
+// primary option rather than the paid one.
 const BETA_FREE_ACCESS = true
 
 export default function PreviewPage() {
@@ -262,13 +263,17 @@ export default function PreviewPage() {
             : 'RentEdge has already identified opportunities, strengths, and questions within your situation. Unlock to reveal everything we found.'}
         </p>
 
-        {/* Plan selector — matches the unlock page's R49 / R89 model */}
+        {/* Plan selector — matches the unlock page's R49 / R89 model. Each
+            card now carries its own "Free during beta" badge, not just the
+            one at the top of the section, so the free framing is visible
+            even if someone's attention lands directly on the price. */}
         <div style={{ display: 'grid', gridTemplateColumns: properties.length > 1 ? '1fr 1fr' : '1fr', gap: 10, marginTop: 20 }}>
 
           {/* Single property */}
           <button
             onClick={() => setSelectedPlan('single')}
             style={{
+              position: 'relative',
               padding: '16px 14px',
               borderRadius: 'var(--radius-card)',
               border: `1px solid ${selectedPlan === 'single' ? 'var(--gold)' : 'var(--gold-border)'}`,
@@ -278,6 +283,16 @@ export default function PreviewPage() {
               transition: 'all 140ms ease',
             }}
           >
+            {BETA_FREE_ACCESS && (
+              <span style={{
+                position: 'absolute', top: -9, left: 14,
+                fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                padding: '3px 9px', borderRadius: 'var(--radius-pill)',
+                background: 'var(--success)', color: '#062', whiteSpace: 'nowrap',
+              }}>
+                Free during beta
+              </span>
+            )}
             <p style={{ fontSize: 11, fontWeight: 600, color: 'var(--gold-text)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>This property</p>
             <p style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)', letterSpacing: '-0.03em', marginTop: 6 }}>R49</p>
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Once-off unlock</p>
@@ -288,17 +303,27 @@ export default function PreviewPage() {
             <button
               onClick={() => setSelectedPlan('bundle')}
               style={{
+                position: 'relative',
                 padding: '16px 14px',
                 borderRadius: 'var(--radius-card)',
                 border: `1px solid ${selectedPlan === 'bundle' ? 'var(--gold)' : 'var(--gold-border)'}`,
                 background: selectedPlan === 'bundle' ? 'rgba(201,168,76,0.18)' : 'rgba(201,168,76,0.06)',
                 textAlign: 'left',
                 cursor: 'pointer',
-                position: 'relative',
                 overflow: 'hidden',
                 transition: 'all 140ms ease',
               }}
             >
+              {BETA_FREE_ACCESS && (
+                <span style={{
+                  position: 'absolute', top: -9, left: 14,
+                  fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', textTransform: 'uppercase',
+                  padding: '3px 9px', borderRadius: 'var(--radius-pill)',
+                  background: 'var(--success)', color: '#062', whiteSpace: 'nowrap',
+                }}>
+                  Free during beta
+                </span>
+              )}
               <div style={{
                 position: 'absolute', top: 8, right: -18, background: 'var(--gold)', color: '#1a1200',
                 fontSize: 9, fontWeight: 700, letterSpacing: '0.06em', padding: '3px 24px',
@@ -332,20 +357,23 @@ export default function PreviewPage() {
           </p>
         </div>
 
-        {/* Pay CTA — kept functional so plan-intent data is real, once Payfast is live this becomes the actual paid path */}
-        <button
-          onClick={handleContinue}
-          disabled={!selectedPlan}
-          className="btn-gold"
-          style={{ marginTop: 16, opacity: selectedPlan ? 1 : 0.4 }}
-        >
-          {selectedPlan === 'single' ? 'Unlock for R49' : selectedPlan === 'bundle' ? 'Unlock for R89' : 'Select an option to continue'}
-        </button>
-
-        {BETA_FREE_ACCESS && (
+        {/* CTA hierarchy — while BETA_FREE_ACCESS is true, the free path is
+            the visually primary button (btn-gold, appears first) and the
+            paid path is secondary (btn-secondary, appears after). Once the
+            flag flips to false post-beta, this automatically reverts to the
+            original paid-primary hierarchy with no further changes needed. */}
+        {BETA_FREE_ACCESS ? (
           <>
+            <button
+              onClick={handleContinueFree}
+              className="btn-gold"
+              style={{ marginTop: 16, width: '100%' }}
+            >
+              Continue free during beta →
+            </button>
+
             <div style={{
-              marginTop: 14, padding: '12px 14px', borderRadius: 'var(--radius-sm)',
+              marginTop: 10, padding: '12px 14px', borderRadius: 'var(--radius-sm)',
               background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border-soft)',
             }}>
               <p style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
@@ -353,14 +381,29 @@ export default function PreviewPage() {
                 We're still in beta, so everything above is free right now — you will not be charged. Pricing shown is what it will cost once beta ends.
               </p>
             </div>
+
             <button
-              onClick={handleContinueFree}
+              onClick={handleContinue}
+              disabled={!selectedPlan}
               className="btn-secondary"
-              style={{ marginTop: 10, fontSize: 14 }}
+              style={{ marginTop: 10, width: '100%', fontSize: 13, opacity: selectedPlan ? 1 : 0.5 }}
             >
-              Continue free during beta →
+              {selectedPlan === 'single'
+                ? 'Or unlock for R49 now'
+                : selectedPlan === 'bundle'
+                ? 'Or unlock for R89 now'
+                : 'Or select a plan to unlock now'}
             </button>
           </>
+        ) : (
+          <button
+            onClick={handleContinue}
+            disabled={!selectedPlan}
+            className="btn-gold"
+            style={{ marginTop: 16, opacity: selectedPlan ? 1 : 0.4 }}
+          >
+            {selectedPlan === 'single' ? 'Unlock for R49' : selectedPlan === 'bundle' ? 'Unlock for R89' : 'Select an option to continue'}
+          </button>
         )}
 
       </div>

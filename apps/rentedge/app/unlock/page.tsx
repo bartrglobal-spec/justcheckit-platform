@@ -71,6 +71,19 @@ function computeUpfrontCosts(rent: number) {
   return { depositLow, depositHigh, firstMonth, adminLow, adminHigh, total }
 }
 
+// Formats a South African phone number for a wa.me link, which needs the
+// country code with no leading zero, spaces, or dashes. Returns null
+// rather than guessing if the number doesn't look like a number we can
+// confidently format — a broken WhatsApp link is worse than no button.
+function formatPhoneForWhatsApp(phone?: string | null): string | null {
+  if (!phone) return null
+  const digits = phone.replace(/[^0-9]/g, '')
+  if (!digits) return null
+  if (digits.startsWith('27') && digits.length >= 11) return digits
+  if (digits.startsWith('0') && digits.length === 10) return '27' + digits.slice(1)
+  return null
+}
+
 const FINANCIAL_STRENGTH_LABEL: Record<string, string> = {
   strong: 'Strong',
   stable: 'Stable',
@@ -360,12 +373,14 @@ export default function UnlockPage() {
   const [showPdfModal, setShowPdfModal] = useState(false)
   const [pdfDownloading, setPdfDownloading] = useState(false)
 
-  // Populated later by the agent-referral capture mechanism (separate work,
-  // not part of this page) — reads a simple stored agent name if a renter
-  // arrived via an agent's referral link. Stays null for organic traffic,
-  // which is everyone right now, so this renders nothing until that
-  // capture mechanism exists.
+  // Populated by the agent-referral capture mechanism (app/r/[agent]) if a
+  // renter arrived via an agent's referral link. Stays null for organic
+  // traffic. Phone/email drive the WhatsApp/email quick-send buttons on
+  // the Strategy tab — name alone isn't enough to build those links.
   const [referringAgent, setReferringAgent] = useState<string | null>(null)
+  const [referringAgentSlug, setReferringAgentSlug] = useState<string | null>(null)
+  const [referringAgentPhone, setReferringAgentPhone] = useState<string | null>(null)
+  const [referringAgentEmail, setReferringAgentEmail] = useState<string | null>(null)
 
   // ── Unlock state ─────────────────────────────────────
   // { all: true } once the bundle is purchased, or propertyIds contains
@@ -394,12 +409,14 @@ export default function UnlockPage() {
     else if (savedProperties.length > 0) setSelectedId(savedProperties[0].id)
     const savedUnlock = JSON.parse(localStorage.getItem('rentedge_unlock_state') || 'null')
     if (savedUnlock) setUnlockState(savedUnlock)
-    // TODO(agent-referral): this key doesn't get written anywhere yet — the
-    // capture mechanism (agent link → stored on entry) is separate future
-    // work. Reading it here now means the Strategy tab slot is ready to go
-    // live the moment that capture step exists, with no further page changes.
     const savedAgent = localStorage.getItem('rentedge_referring_agent')
     if (savedAgent) setReferringAgent(savedAgent)
+    const savedAgentSlug = localStorage.getItem('rentedge_referring_agent_slug')
+    if (savedAgentSlug) setReferringAgentSlug(savedAgentSlug)
+    const savedAgentPhone = localStorage.getItem('rentedge_referring_agent_phone')
+    if (savedAgentPhone) setReferringAgentPhone(savedAgentPhone)
+    const savedAgentEmail = localStorage.getItem('rentedge_referring_agent_email')
+    if (savedAgentEmail) setReferringAgentEmail(savedAgentEmail)
     setReady(true)
   }, [])
 
@@ -589,6 +606,28 @@ export default function UnlockPage() {
     `#8BC34A ${barPct(thresholds.stable)}%, #8BC34A ${barPct(thresholds.strong)}%, ` +
     `#1D9E75 ${barPct(thresholds.strong)}%, #1D9E75 100%)`
 
+  // Logs a message-sent event against the referring agent, if there is one.
+  // Fire-and-forget on purpose — this should never block or interrupt the
+  // renter actually sending their message, so failures are silently ignored.
+  const logMessageSent = (channel: 'whatsapp' | 'email') => {
+    if (!referringAgentSlug) return
+    fetch('/api/referrals/event', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slug: referringAgentSlug, channel }),
+    }).catch(() => {})
+  }
+
+  // ── Send-message links — only meaningful when a real agent is on file ──
+  const introMessage = unlock.introduction.introduction
+  const whatsappPhone = formatPhoneForWhatsApp(referringAgentPhone)
+  const whatsappHref = whatsappPhone
+    ? `https://wa.me/${whatsappPhone}?text=${encodeURIComponent(introMessage)}`
+    : null
+  const emailHref = referringAgentEmail
+    ? `mailto:${referringAgentEmail}?subject=${encodeURIComponent('Enquiry about ' + cleanTitle(selectedProperty.area || selectedProperty.title))}&body=${encodeURIComponent(introMessage)}`
+    : null
+
   // Builds the real payload from the same data already driving this page,
   // calls the PDF API, and triggers a browser download of the result.
   const handleDownloadPdf = async (contact: { name: string; phone: string; email: string }) => {
@@ -616,7 +655,7 @@ export default function UnlockPage() {
         // changed to match.
         guarantorText: buildGuarantorText(renter.guarantorStatus),
         referenceContactText: buildReferenceContactText(profile?.referenceAvailability),
-        introMessage: unlock.introduction.introduction,
+        introMessage,
       }
 
       const res = await fetch('/api/summary-pdf', {
@@ -1158,10 +1197,43 @@ export default function UnlockPage() {
               whiteSpace: 'pre-line',
             }}>
               <p style={{ fontSize: 14, color: 'var(--text-primary)', lineHeight: 1.8 }}>
-                {unlock.introduction.introduction}
+                {introMessage}
               </p>
             </div>
-            <CopyBtn text={unlock.introduction.introduction} />
+
+            {/* Send buttons — WhatsApp primary (matches how SA renters
+                actually contact agents, and avoids the mailto reliability
+                problem we hit on the agent signup form), email secondary,
+                copy-to-clipboard always available as the universal fallback.
+                WhatsApp/email only render when we actually have that
+                contact detail for a real referring agent — otherwise there's
+                no specific recipient to build a link to. */}
+            {whatsappHref && (
+              <a
+                href={whatsappHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={() => { posthog.capture('intro_message_send_clicked', { channel: 'whatsapp' }); logMessageSent('whatsapp') }}
+                className="btn-gold"
+                style={{ marginTop: 16, width: '100%', display: 'block', textAlign: 'center', textDecoration: 'none' }}
+              >
+                Send via WhatsApp →
+              </a>
+            )}
+            {emailHref && (
+              <a
+                href={emailHref}
+                onClick={() => { posthog.capture('intro_message_send_clicked', { channel: 'email' }); logMessageSent('email') }}
+                className="btn-secondary"
+                style={{
+                  marginTop: 8, width: '100%', display: 'block', textAlign: 'center',
+                  textDecoration: 'none', fontSize: 13,
+                }}
+              >
+                Send via email instead
+              </a>
+            )}
+            <CopyBtn text={introMessage} label={whatsappHref || emailHref ? 'Copy message instead' : 'Copy introduction message'} />
 
             <p style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 10, lineHeight: 1.5 }}>
               Includes your income ratio, document checklist, and this introduction message — one page, ready to send to an agent.
