@@ -77,11 +77,11 @@ export default async function AgentDashboardPage({
       )}
 
       <div className="card card-elevated">
-        <p className="label" style={{ marginBottom: 4 }}>Your link</p>
-        <p className="section-subtitle" style={{ marginBottom: 8 }}>
-          Tap Copy, then send it wherever you'd normally reach renters — WhatsApp, email, a printed flyer, or pasted into a listing. Anyone who taps it is automatically tagged as coming from you.
-        </p>
-        <CopyLinkRow link={referralLink} />
+        <CopyLinkRow
+          label="Your link"
+          link={referralLink}
+          hint="Tap Copy, then send it wherever you'd normally reach renters — WhatsApp, email, a printed flyer, or pasted into a listing. Anyone who taps it is automatically tagged as coming from you."
+        />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
